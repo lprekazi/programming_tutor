@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunResult } from './protocol'
-import { buildVerificationProgram, interpretRun, type ExerciseBundle } from './verification'
+import type { PythonRunner } from './runner'
+import {
+  DEFAULT_VERIFICATION_TIMEOUT_MS,
+  buildVerificationProgram,
+  interpretRun,
+  verifyExercise,
+  type ExerciseBundle,
+} from './verification'
 
 const MARKER = '__exercise_verification__:abc123:'
 
@@ -120,5 +127,99 @@ describe('interpretRun', () => {
     const verdict = interpretRun({ status: 'unavailable', message: 'no worker' }, MARKER)
 
     expect(verdict).toEqual({ status: 'unavailable', message: 'no worker' })
+  })
+})
+
+describe('verifyExercise', () => {
+  /** A runner stub that records how it was used and returns a fixed result. */
+  function stubRunner(result: RunResult) {
+    const calls: { code: string; timeoutMs: number | undefined }[] = []
+    let disposed = false
+
+    const runner = {
+      run: (code: string, options?: { timeoutMs?: number }) => {
+        calls.push({ code, timeoutMs: options?.timeoutMs })
+        return Promise.resolve(result)
+      },
+      dispose: () => {
+        disposed = true
+      },
+    }
+
+    return {
+      calls,
+      get disposed() {
+        return disposed
+      },
+      create: () => runner as unknown as PythonRunner,
+    }
+  }
+
+  it('runs the harness on its own interpreter and releases it afterwards', async () => {
+    const stub = stubRunner(ok(`${MARKER}{"failures": []}\n`))
+    let created = 0
+
+    const verdict = await verifyExercise(BUNDLE, {
+      marker: MARKER,
+      createRunner: () => {
+        created += 1
+        return stub.create()
+      },
+    })
+
+    expect(verdict).toEqual({ status: 'passed' })
+    // A dedicated worker, kept away from the learner's, and not left running.
+    expect(created).toBe(1)
+    expect(stub.disposed).toBe(true)
+    expect(stub.calls[0]?.code).toContain('def double(n):')
+  })
+
+  it('applies the verification timeout budget', async () => {
+    const stub = stubRunner(ok(`${MARKER}{"failures": []}\n`))
+
+    await verifyExercise(BUNDLE, { marker: MARKER, createRunner: stub.create, timeoutMs: 2500 })
+
+    expect(stub.calls[0]?.timeoutMs).toBe(2500)
+  })
+
+  it('defaults to the documented verification budget', async () => {
+    const stub = stubRunner(ok(`${MARKER}{"failures": []}\n`))
+
+    await verifyExercise(BUNDLE, { marker: MARKER, createRunner: stub.create })
+
+    expect(stub.calls[0]?.timeoutMs).toBe(DEFAULT_VERIFICATION_TIMEOUT_MS)
+  })
+
+  it('reports a timeout as a timeout, and still releases the interpreter', async () => {
+    const stub = stubRunner({
+      status: 'timeout',
+      stdout: '',
+      stderr: '',
+      truncated: false,
+      timeoutMs: DEFAULT_VERIFICATION_TIMEOUT_MS,
+    })
+
+    const verdict = await verifyExercise(BUNDLE, { marker: MARKER, createRunner: stub.create })
+
+    expect(verdict).toEqual({
+      status: 'timeout',
+      timeoutMs: DEFAULT_VERIFICATION_TIMEOUT_MS,
+    })
+    expect(stub.disposed).toBe(true)
+  })
+
+  it('releases the interpreter even when the run throws', async () => {
+    let disposed = false
+    const runner = {
+      run: () => Promise.reject(new Error('worker exploded')),
+      dispose: () => {
+        disposed = true
+      },
+    } as unknown as PythonRunner
+
+    await expect(
+      verifyExercise(BUNDLE, { marker: MARKER, createRunner: () => runner }),
+    ).rejects.toThrow('worker exploded')
+    expect(disposed).toBe(true)
   })
 })
