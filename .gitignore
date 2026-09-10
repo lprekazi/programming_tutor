@@ -1,0 +1,23 @@
+# Environment secrets
+.env
+.env.local
+.env.*.local
+
+# Safe environment template
+!.env.example
+
+# Local Claude configuration
+CLAUDE.local.md
+.claude/settings.local.json
+.claude/agents/
+
+# Private benchmark / research material
+.benchmark-private/
+
+# Dependencies / build output
+node_modules/
+.next/
+out/
+coverage/
+playwright-report/
+test-results/
