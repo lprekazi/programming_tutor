@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "WebWorker"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "rootDir": "./src/python",
+    "outDir": "./public/workers",
+    "noEmit": false,
+    "incremental": false,
+    "sourceMap": true,
+    "plugins": []
+  },
+  "include": ["src/python/*.worker.ts"]
+}

@@ -1,0 +1,43 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--width-app);
+  margin-inline: auto;
+  padding: var(--space-7) var(--space-5) var(--space-9);
+}
+
+@media (max-width: 40rem) {
+  .main {
+    padding: var(--space-6) var(--space-4) var(--space-8);
+  }
+}
+
+/*
+ * Off-screen until focused, then anchored top-left. Keyboard users reach it with a
+ * single Tab from page load (WCAG 2.2 SC 2.4.1).
+ */
+.skipLink {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 10;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  transform: translateY(calc(-100% - var(--space-4)));
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.skipLink:focus {
+  transform: translateY(0);
+}
