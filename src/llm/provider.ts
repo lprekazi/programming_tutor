@@ -39,6 +39,8 @@ export interface StructuredRequest<T> {
   readonly schema: z.ZodType<T>
   /** Name given to the schema in the request; must be a stable identifier. */
   readonly schemaName: string
+  /** Abandons the call when the learner navigates away or cancels. */
+  readonly signal?: AbortSignal | undefined
 }
 
 export interface TextRequest {
@@ -69,7 +71,8 @@ export type StructuredResult<T> =
   | {
       readonly ok: true
       readonly value: T
-      readonly usage: TokenUsage
+      /** Absent when the provider reported none. Never guessed — the log documents this. */
+      readonly usage: TokenUsage | null
       /** True when the first response failed validation and a repair attempt succeeded. */
       readonly repaired: boolean
     }
@@ -84,6 +87,24 @@ export interface TutorProvider {
   structured<T>(request: StructuredRequest<T>): Promise<StructuredResult<T>>
   /** A prose call whose result is shown to the learner as it arrives. */
   streamText(request: TextRequest, signal?: AbortSignal): AsyncIterable<TextChunk>
+}
+
+/** Renders blocks the way a provider sees them. One definition, used by both providers and by tests. */
+export function renderPrompt(blocks: readonly { role: string; text: string }[]): string {
+  return blocks.map((block) => `<${block.role}>\n${block.text}`).join('\n\n')
+}
+
+/**
+ * The prefix made entirely of stable blocks: what a provider could reuse between calls.
+ *
+ * Defined once here. It had been written twice, identically, and two definitions of "the
+ * cacheable prefix" is one too many — they can disagree.
+ */
+export function stablePrefixOf(
+  blocks: readonly { role: string; stability: string; text: string }[],
+): string {
+  const firstDynamic = blocks.findIndex((block) => block.stability === 'dynamic')
+  return renderPrompt(firstDynamic === -1 ? blocks : blocks.slice(0, firstDynamic))
 }
 
 /** Concatenates a stream into a single string. Convenience for tests and non-streaming callers. */

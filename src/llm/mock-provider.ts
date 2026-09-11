@@ -4,7 +4,6 @@ import type {
   StructuredResult,
   TextChunk,
   TextRequest,
-  TokenUsage,
   TutorProvider,
 } from './provider'
 
@@ -37,7 +36,8 @@ export interface RecordedCall {
   readonly stablePrefix: string
 }
 
-const NO_USAGE: TokenUsage = { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 }
+/** The mock makes no calls, so it has no usage to report. */
+const NO_USAGE = null
 
 /** Renders blocks the way a provider would see them, for assertions on prompt assembly. */
 export function renderPrompt(blocks: readonly { role: string; text: string }[]): string {

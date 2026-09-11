@@ -1,0 +1,260 @@
+import { MockProvider, type MockResponse } from './mock-provider'
+
+/**
+ * Behavioural scenarios for the mock provider.
+ *
+ * These describe *situations a tutor gets into*, not shapes the code happens to produce: a
+ * learner who answers well, one who shows a specific misconception, a model that returns
+ * something unusable and then fixes it, a model that refuses, a provider that is down.
+ *
+ * That distinction matters. A fixture that mirrors the implementation passes for as long as
+ * the implementation stays the same and tells you nothing about whether it is right. A
+ * fixture that describes a situation keeps its meaning when the implementation changes — and
+ * if the change breaks the situation, the test fails, which is the point.
+ *
+ * Later milestones build learner journeys out of these rather than inventing payloads
+ * inline, so the same "learner who confuses range endpoints" is the same learner everywhere.
+ */
+
+// ---------------------------------------------------------------------------
+// Successful tutoring
+// ---------------------------------------------------------------------------
+
+/** A quiz whose distractors map to real misconceptions. */
+export const QUIZ_ON_RANGE: MockResponse = {
+  kind: 'value',
+  value: {
+    question: 'What does this print?\n\nfor i in range(3):\n    print(i)',
+    options: ['0 1 2', '1 2 3', '0 1 2 3', '3'],
+    correctIndex: 0,
+    distractorMisconceptions: [null, 'range-endpoint-inclusive', 'range-endpoint-inclusive', null],
+    explanation:
+      'range(3) produces 0, 1 and 2 — three values, starting at 0 and stopping before 3.',
+  },
+}
+
+/** A learner who got it right, unaided, with sound reasoning. */
+export const ANSWER_CORRECT: MockResponse = {
+  kind: 'value',
+  value: {
+    correct: true,
+    explanation:
+      'That is right. range(3) stops before 3, so the loop runs with i as 0, 1 and 2.',
+    misconceptions: [],
+    nearMiss: false,
+  },
+}
+
+/** A learner who got it wrong in a way that names a catalogued misconception. */
+export const ANSWER_SHOWS_MISCONCEPTION: MockResponse = {
+  kind: 'value',
+  value: {
+    correct: false,
+    explanation:
+      'Not quite. You have included 3, but range(3) stops just before 3 — it gives you 0, 1 and 2.',
+    misconceptions: ['range-endpoint-inclusive'],
+    nearMiss: true,
+  },
+}
+
+/** An attempt the tutor could read, on a concept it was set. */
+export const PROFILE_OBSERVATION: MockResponse = {
+  kind: 'value',
+  value: {
+    demonstratedConcepts: ['for-loops-and-range'],
+    misconceptions: ['range-endpoint-inclusive'],
+    judgement: 'misunderstanding',
+    evidence: 'They wrote "0 1 2 3", which includes the endpoint, so they expect range to stop at 3 rather than before it.',
+  },
+}
+
+/** A hint that points without solving. */
+export const HINT_ORIENTING: MockResponse = {
+  kind: 'value',
+  value: {
+    text: 'Try writing out by hand which values i takes. How many times does the loop body run?',
+    kind: 'orienting',
+  },
+}
+
+/** Feedback on code that runs but is wrong. */
+export const CODE_FEEDBACK: MockResponse = {
+  kind: 'value',
+  value: {
+    summary: 'It runs, but it counts one item too many.',
+    observations: [
+      {
+        where: 'the range on line 2',
+        what: 'range(len(items) + 1) goes one past the last index, so the final pass reads an item that is not there.',
+      },
+    ],
+    nextStep: 'Work out what the largest valid index is for a list of five items, then compare that to what your range produces.',
+    misconceptions: ['range-endpoint-inclusive'],
+  },
+}
+
+/** A generated exercise with a solution and tests that agree with each other. */
+export const CODE_TASK: MockResponse = {
+  kind: 'value',
+  value: {
+    title: 'Count the evens',
+    brief: 'Write a function count_evens(numbers) that returns how many numbers in the list are even.',
+    starterCode: 'def count_evens(numbers):\n    """Return how many numbers in the list are even."""\n    pass\n',
+    referenceSolution: 'def count_evens(numbers):\n    total = 0\n    for number in numbers:\n        if number % 2 == 0:\n            total += 1\n    return total\n',
+    tests: [
+      { name: 'counts evens in a mixed list', code: 'assert count_evens([1, 2, 3, 4]) == 2' },
+      { name: 'returns zero for an empty list', code: 'assert count_evens([]) == 0' },
+      { name: 'handles negative numbers', code: 'assert count_evens([-2, -1]) == 1' },
+    ],
+    declaredDifficulty: 'typical',
+  },
+}
+
+/** A hypothesis about a repeated mistake, with a question that would test it. */
+export const DIAGNOSIS: MockResponse = {
+  kind: 'value',
+  value: {
+    likelyBelief: 'They believe range(n) counts up to and including n.',
+    candidates: ['range-endpoint-inclusive'],
+    checkingQuestion: 'How many numbers does range(4) produce, and what is the last one?',
+    strength: 'moderate',
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Things going wrong
+// ---------------------------------------------------------------------------
+
+/** Fails the schema: a required field is missing. */
+export const INVALID_MISSING_FIELD: MockResponse = {
+  kind: 'value',
+  value: { correct: true, misconceptions: [], nearMiss: false },
+}
+
+/** Passes the schema, fails an invariant: two options are the same. */
+export const INVALID_DUPLICATE_OPTIONS: MockResponse = {
+  kind: 'value',
+  value: {
+    question: 'What does range(3) produce?',
+    options: ['0 1 2', '0 1 2', '1 2 3', '3'],
+    correctIndex: 0,
+    distractorMisconceptions: [null, null, 'range-endpoint-inclusive', null],
+    explanation: 'range(3) gives 0, 1 and 2.',
+  },
+}
+
+/** Names a concept that does not exist. */
+export const INVALID_UNKNOWN_CONCEPT: MockResponse = {
+  kind: 'value',
+  value: {
+    demonstratedConcepts: ['quantum-loops'],
+    misconceptions: [],
+    judgement: 'sound',
+    evidence: 'They answered correctly.',
+  },
+}
+
+/** Names a misconception that does not exist. */
+export const INVALID_UNKNOWN_MISCONCEPTION: MockResponse = {
+  kind: 'value',
+  value: {
+    correct: false,
+    explanation: 'That is not right.',
+    misconceptions: ['forgot-the-semicolons'],
+    nearMiss: false,
+  },
+}
+
+/** A hint that hands over the answer. */
+export const INVALID_HINT_REVEALS_SOLUTION: MockResponse = {
+  kind: 'value',
+  value: {
+    text: 'Here you go:\n\ndef count_evens(numbers):\n    total = 0\n    for number in numbers:\n        if number % 2 == 0:\n            total += 1\n    return total',
+    kind: 'specific',
+  },
+}
+
+/** Nothing usable at all. */
+export const INVALID_NONSENSE: MockResponse = {
+  kind: 'value',
+  value: { lorem: 'ipsum', dolor: [1, 2, 3] },
+}
+
+/** Text far past the cap, which would break layout and cost money if accepted. */
+export const INVALID_OVERSIZED: MockResponse = {
+  kind: 'value',
+  value: {
+    correct: true,
+    explanation: 'x'.repeat(10_000),
+    misconceptions: [],
+    nearMiss: false,
+  },
+}
+
+export const REFUSED: MockResponse = {
+  kind: 'failure',
+  failure: { reason: 'refused', message: 'The tutor declined to answer that one.' },
+}
+
+export const UNAVAILABLE: MockResponse = {
+  kind: 'failure',
+  failure: {
+    reason: 'unavailable',
+    message: 'The tutor is not reachable at the moment. Your progress is saved.',
+    detail: 'connect ETIMEDOUT',
+  },
+}
+
+export const MISCONFIGURED: MockResponse = {
+  kind: 'failure',
+  failure: {
+    reason: 'misconfigured',
+    message: 'The tutor is not configured correctly. Check the application settings.',
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Streaming
+// ---------------------------------------------------------------------------
+
+export const EXPLANATION_STREAM: MockResponse = {
+  kind: 'text',
+  chunks: [
+    'Think of range(3) as a countdown that ',
+    'stops just before it reaches 3. ',
+    'So you get 0, 1 and 2 — three values. ',
+    'What would range(1) give you?',
+  ],
+}
+
+// ---------------------------------------------------------------------------
+// Composed scenarios
+// ---------------------------------------------------------------------------
+
+/**
+ * A provider that fails validation once and then gets it right.
+ *
+ * Queued responses are consumed in order, so this is exactly what the repair path sees.
+ */
+export function repairSucceeds(strategy: string, invalid: MockResponse, valid: MockResponse): MockProvider {
+  return new MockProvider().on(strategy, invalid).on(strategy, valid)
+}
+
+/** A provider that fails validation, and fails again when asked to correct itself. */
+export function repairFails(strategy: string, invalid: MockResponse): MockProvider {
+  return new MockProvider().on(strategy, invalid).on(strategy, invalid).on(strategy, invalid)
+}
+
+/** A provider wired for an ordinary, successful tutoring exchange. */
+export function workingTutor(): MockProvider {
+  return new MockProvider()
+    .on('converse', EXPLANATION_STREAM)
+    .on('explain', EXPLANATION_STREAM)
+    .on('quiz.generate', QUIZ_ON_RANGE)
+    .on('answer.evaluate', ANSWER_CORRECT)
+    .on('diagnose', DIAGNOSIS)
+    .on('code.task.generate', CODE_TASK)
+    .on('code.feedback', CODE_FEEDBACK)
+    .on('hint', HINT_ORIENTING)
+    .on('profile.update', PROFILE_OBSERVATION)
+}
