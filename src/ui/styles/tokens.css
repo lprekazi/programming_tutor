@@ -69,7 +69,13 @@
 
   --ink: #1a1917;
   --ink-muted: #57534e;
-  --ink-faint: #8a857e;
+  /*
+   * Darkened from #8a857e, which measured 3.51:1 on the ground and 3.27:1 on the sunken
+   * ground — below the 4.5:1 WCAG 2.2 AA requirement for text this size. It is not decorative:
+   * it carries the progress line, the "Not started" band, evidence strength and every eyebrow.
+   * This value measures 4.91 / 4.58 / 5.13 against ground, sunken and surface.
+   */
+  --ink-faint: #726d66;
   --ink-inverse: #fbfaf7;
 
   --rule: #e4e0d8;
@@ -97,7 +103,8 @@
 
     --ink: #ebe8e2;
     --ink-muted: #a8a39a;
-    --ink-faint: #7b766e;
+    /* Lightened from #7b766e (4.05:1 on the ground, 3.64:1 on surface). Now 4.98 / 5.22 / 4.64. */
+    --ink-faint: #8a857c;
     --ink-inverse: #161513;
 
     --rule: #302e2b;

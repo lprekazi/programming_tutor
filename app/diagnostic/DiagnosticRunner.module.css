@@ -1,0 +1,272 @@
+.runner {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.prompt {
+  font-family: var(--font-serif);
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+}
+
+.code,
+.output,
+.traceback {
+  padding: var(--space-4);
+  overflow-x: auto;
+  background-color: var(--ground-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  line-height: var(--leading-normal);
+  tab-size: 4;
+  white-space: pre;
+}
+
+.traceback {
+  background-color: var(--negative-quiet);
+  border-color: var(--negative-quiet);
+  color: var(--negative);
+}
+
+.fieldset {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fieldset:disabled {
+  opacity: 0.7;
+}
+
+.label {
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.help {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.options {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  /* Comfortably above the 24px minimum target size, and the whole row is the target. */
+  min-height: 2.75rem;
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.option:hover {
+  background-color: var(--ground-sunken);
+}
+
+.option:has(input:checked) {
+  border-color: var(--rule-strong);
+  background-color: var(--surface);
+}
+
+.textarea,
+.editor {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background-color: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  line-height: var(--leading-normal);
+  resize: vertical;
+}
+
+.editor {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  tab-size: 4;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.secondary {
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--ink-faint);
+}
+
+.secondary:disabled {
+  color: var(--ink-faint);
+  cursor: default;
+}
+
+.primary {
+  padding: var(--space-3) var(--space-5);
+  background-color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  color: var(--surface);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.primary:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.quiet {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.bad {
+  color: var(--negative);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* ---- what the learner's own program did --------------------------------- */
+
+/*
+ * Deliberately a separate region from the verdict below. "My program printed this" and "this
+ * answer was right" are different facts, and running them together is how a learner ends up
+ * believing that code which happens to print something is code which happens to work.
+ */
+.runResult {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.sectionHeading {
+  color: var(--ink-faint);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.tests {
+  display: grid;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.testPass,
+.testFail {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.testPass {
+  color: var(--ink);
+}
+
+.testFail {
+  color: var(--negative);
+}
+
+.testMark {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The exception that failed the check. Guarding each test hides the traceback, so this is
+   the only place the learner learns what actually went wrong. */
+.testError {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+/* ---- the verdict -------------------------------------------------------- */
+
+.verdictGood,
+.verdictBad {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-left: 2px solid;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.verdictGood {
+  background-color: var(--positive-quiet);
+  border-left-color: var(--positive);
+}
+
+.verdictBad {
+  background-color: var(--caution-quiet);
+  border-left-color: var(--caution);
+}
+
+.verdictHeading {
+  font-family: var(--font-serif);
+  font-size: var(--text-lg);
+}
+
+.expected,
+.explanation {
+  line-height: var(--leading-relaxed);
+}
+
+.expected code {
+  white-space: pre-wrap;
+}
+
+/* Small, but never hidden: how an answer was marked is part of the answer. */
+.attribution {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.cannotJudge {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  background-color: var(--caution-quiet);
+  border-left: 2px solid var(--caution);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  line-height: var(--leading-relaxed);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-3);
+}

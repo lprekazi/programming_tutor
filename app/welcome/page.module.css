@@ -1,0 +1,332 @@
+.page {
+  max-width: var(--measure-prose);
+}
+
+.header {
+  margin-bottom: var(--space-6);
+}
+
+.eyebrow {
+  margin-bottom: var(--space-3);
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.header h1 {
+  font-size: var(--text-2xl);
+}
+
+.lead {
+  margin-top: var(--space-4);
+  color: var(--ink-muted);
+  line-height: var(--leading-relaxed);
+}
+
+/* ---- step indicator ---------------------------------------------------- */
+
+/*
+ * A list of three, not a progress bar. The learner needs to know how much is left, which three
+ * named steps say better than a filled rectangle.
+ */
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  margin: 0 0 var(--space-7);
+  padding: 0 0 var(--space-4);
+  border-bottom: 1px solid var(--rule);
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+.step,
+.stepCurrent,
+.stepDone {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.step {
+  color: var(--ink-faint);
+}
+
+.stepDone {
+  color: var(--ink-muted);
+}
+
+.stepCurrent {
+  color: var(--ink);
+  font-weight: var(--weight-medium);
+}
+
+.stepNumber {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.stepCurrent .stepNumber {
+  background-color: var(--ink);
+  border-color: var(--ink);
+  color: var(--ground);
+}
+
+/* ---- form -------------------------------------------------------------- */
+
+.form {
+  display: grid;
+  gap: var(--space-6);
+}
+
+.field,
+.fieldset {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.label {
+  font-size: var(--text-lg);
+  font-family: var(--font-serif);
+  line-height: var(--leading-snug);
+}
+
+.help {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.textarea {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  background-color: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  line-height: var(--leading-normal);
+  resize: vertical;
+}
+
+.checkboxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.checkbox {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.choices {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-3);
+}
+
+.choice {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.choice:hover {
+  background-color: var(--ground-sunken);
+}
+
+.choice:has(input:checked) {
+  border-color: var(--rule-strong);
+  background-color: var(--surface);
+}
+
+.choiceLabel {
+  display: block;
+}
+
+.choiceHint {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+}
+
+/* ---- confidence grid ---------------------------------------------------- */
+
+/*
+ * A table, because it is one: topics down, confidence across. A grid of cards would take three
+ * times the space and say less.
+ */
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.grid th[scope='col'] {
+  padding: 0 var(--space-2) var(--space-3);
+  color: var(--ink-faint);
+  font-weight: var(--weight-regular);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.grid td {
+  padding: var(--space-2);
+  border-top: 1px solid var(--rule);
+  text-align: center;
+}
+
+.rowHeader {
+  padding: var(--space-3) var(--space-3) var(--space-3) 0;
+  border-top: 1px solid var(--rule);
+  font-weight: var(--weight-regular);
+  text-align: left;
+}
+
+.areaLabel {
+  display: block;
+}
+
+.areaHint {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  line-height: var(--leading-snug);
+}
+
+/* The whole cell is the target, so it is comfortably larger than the control itself. */
+/* Hidden while the column headings carry the meaning. */
+.cellLabel {
+  display: none;
+}
+
+.radioCell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+.error {
+  color: var(--negative);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.stepActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/*
+ * Deliberately quiet. Going back is useful when a learner mis-clicked and clutter the rest of
+ * the time, so it reads as a link rather than competing with Continue for attention.
+ */
+.back {
+  min-height: 2.75rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.back:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.primary {
+  justify-self: start;
+  padding: var(--space-3) var(--space-5);
+  background-color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  color: var(--surface);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.primary:hover {
+  background-color: var(--accent-hover);
+}
+
+.saved {
+  margin-top: var(--space-7);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--rule);
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+
+@media (max-width: 40rem) {
+  .grid,
+  .grid thead,
+  .grid tbody,
+  .grid tr,
+  .grid th,
+  .grid td {
+    display: block;
+  }
+
+  .grid thead {
+    display: none;
+  }
+
+  .grid tr {
+    padding: var(--space-3) 0;
+    border-top: 1px solid var(--rule);
+  }
+
+  .rowHeader {
+    padding: 0 0 var(--space-2);
+    border-top: 0;
+  }
+
+  .grid td {
+    display: inline-block;
+    border-top: 0;
+    padding: 0;
+  }
+
+  /* Labels return on narrow screens, where the column headers are gone. */
+  .radioCell {
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2);
+  }
+
+  .cellLabel {
+    display: block;
+    color: var(--ink-muted);
+    font-size: var(--text-xs);
+  }
+}

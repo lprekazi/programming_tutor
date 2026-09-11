@@ -10,6 +10,15 @@ import * as schema from './schema'
 export type Db = ReturnType<typeof createDb>
 
 /**
+ * A database handle, or a transaction on one.
+ *
+ * Repository functions that write take this rather than `Db`, so the same function can be
+ * called directly or from inside a transaction without a cast. Derived from the transaction
+ * callback's own parameter so it cannot drift from what Drizzle actually hands over.
+ */
+export type DbOrTx = Db | Parameters<Parameters<Db['transaction']>[0]>[0]
+
+/**
  * Opens a SQLite database and returns a typed Drizzle client.
  *
  * `:memory:` is accepted so that tests can run against a throwaway database with the

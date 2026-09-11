@@ -103,6 +103,18 @@ hr {
   outline: none;
 }
 
+/*
+ * `hidden` must actually hide.
+ *
+ * The user-agent rule is only `[hidden] { display: none }`, which any later `display` in a
+ * stylesheet overrides — and a panel laid out with `display: grid` therefore stays on screen
+ * while claiming to be hidden. Found by an end-to-end test asserting that an empty live region
+ * was not visible; it was, as a coloured empty box under every unanswered question.
+ */
+[hidden] {
+  display: none !important;
+}
+
 /* Visually hidden but available to assistive technology. */
 .visually-hidden {
   position: absolute;

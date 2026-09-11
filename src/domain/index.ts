@@ -60,3 +60,18 @@ export {
   type SelectionReason,
   type StateLookup,
 } from './scheduling/select'
+
+export * from './diagnostic'
+
+export {
+  MAX_SELF_REPORT_PRIOR,
+  initialStatesFromSelfReport,
+  priorFor,
+  startingDifficulty,
+} from './onboarding/self-report'
+export type {
+  Confidence,
+  ExperienceLevel,
+  OnboardingAnswers,
+  SelfReport,
+} from './onboarding/self-report'

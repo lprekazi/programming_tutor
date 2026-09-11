@@ -148,6 +148,16 @@ const MISCONCEPTION_LIST: readonly Misconception[] = [
     relatedConcepts: ['for-loops-and-range', 'loop-accumulation', 'indexing-and-slicing'],
     source: { kind: 'unattributed' },
   },
+  {
+    id: 'accumulator-overwritten',
+    title: 'A running total keeps only the last value',
+    belief:
+      'A variable assigned inside a loop is replaced on every pass, so it ends up holding only the value from the final one.',
+    reality:
+      'total = total + n reads the previous value before storing the new one, so each pass adds to what is already there. A learner holding this belief predicts the last item rather than the sum.',
+    relatedConcepts: ['loop-accumulation', 'variables-and-assignment', 'for-loops-and-range'],
+    source: { kind: 'unattributed' },
+  },
 
   // ---- functions ------------------------------------------------------------
   {
@@ -199,6 +209,15 @@ const MISCONCEPTION_LIST: readonly Misconception[] = [
     belief: 'An individual character of a string can be replaced by assigning to its position.',
     reality: 'Strings cannot be changed. Operations on them build a new string.',
     relatedConcepts: ['strings', 'indexing-and-slicing', 'list-mutation-and-aliasing'],
+    source: { kind: 'unattributed' },
+  },
+  {
+    id: 'index-starts-at-one',
+    title: 'Counting positions from one',
+    belief: 'The first item of a sequence is at position 1.',
+    reality:
+      'Positions start at 0: names[0] is the first item and names[1] is the second. Negative indices count from the end, so names[-1] is the last.',
+    relatedConcepts: ['indexing-and-slicing', 'lists', 'strings'],
     source: { kind: 'unattributed' },
   },
 ]

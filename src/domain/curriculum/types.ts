@@ -140,6 +140,7 @@ export type MisconceptionId =
   | 'if-is-loop'
   // loops
   | 'range-endpoint-inclusive'
+  | 'accumulator-overwritten'
   // functions
   | 'deferred-return'
   | 'return-unwinds-multiple-frames'
@@ -147,6 +148,7 @@ export type MisconceptionId =
   | 'print-instead-of-return'
   // collections
   | 'string-immutability-ignored'
+  | 'index-starts-at-one'
 
 export interface Misconception {
   readonly id: MisconceptionId

@@ -8,6 +8,13 @@
       "when": 1789065878501,
       "tag": "0000_create_learner",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789108910468,
+      "tag": "0001_onboarding_and_diagnostic",
+      "breakpoints": true
     }
   ]
 }
