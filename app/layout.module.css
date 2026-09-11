@@ -12,6 +12,13 @@
   padding: var(--space-7) var(--space-5) var(--space-9);
 }
 
+/*
+ * Pages set their own, narrower measure inside this shell — prose at 68ch, the concept list a
+ * little wider. Each one centres itself with `margin-inline: auto`, because a narrow column
+ * left-aligned inside a wider centred one sits noticeably left of centre on a large display
+ * and reads as an oversight rather than a choice. The widths themselves are unchanged.
+ */
+
 @media (max-width: 40rem) {
   .main {
     padding: var(--space-6) var(--space-4) var(--space-8);

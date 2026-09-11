@@ -59,11 +59,17 @@ const BAND_LABELS: Readonly<Record<Band, string>> = {
   secure: 'Secure',
 }
 
+/**
+ * How much the band rests on, in the learner's terms.
+ *
+ * Counted in answers, because that is the thing they did. "Evidence" is what the tutor calls
+ * it internally and stays there.
+ */
 const STRENGTH_LABELS: Readonly<Record<EvidenceStrength, string>> = {
   none: 'nothing seen yet',
   limited: 'one or two answers',
   moderate: 'a few answers',
-  strong: 'a good deal of evidence',
+  strong: 'plenty of answers',
 }
 
 const BAND_CLASS: Readonly<Record<Band, string>> = {
@@ -148,8 +154,8 @@ export default function HomePage() {
           </>
         )}
         <p className={styles.pending}>
-          Tutoring sessions are not built yet. This page shows the profile the assessment
-          produced and what the scheduler would choose from it.
+          Guided sessions are not ready yet. For now this page shows what the short assessment
+          found, and where the tutor would begin from it.
         </p>
       </section>
 

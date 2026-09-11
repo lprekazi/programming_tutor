@@ -32,11 +32,10 @@ export {
   TARGET_AREAS,
   conceptsAsked,
   estimatedLevel,
-  remaining,
   isWorthAsking,
   nextDecision,
 } from './plan'
-export type { AnsweredItem, PlanDecision, PlanState, RemainingRange } from './plan'
+export type { AnsweredItem, PlanDecision, PlanState } from './plan'
 
 export { presentItem } from './present'
 export type { PresentedItem } from './present'

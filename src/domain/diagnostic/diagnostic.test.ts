@@ -3,14 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { getConcept } from '../curriculum/graph'
 import { MISCONCEPTIONS_BY_ID } from '../curriculum/misconceptions'
 import type { OnboardingAnswers } from '../onboarding/self-report'
-import { DIAGNOSTIC_ITEMS, getDiagnosticItem, isDeterministic } from './items'
+import { DIAGNOSTIC_ITEMS, getDiagnosticItem, isDeterministic, type ChoiceItem } from './items'
 import {
   FAILURES_BEFORE_SKIP,
   MAX_ITEMS,
   MIN_ITEMS,
   conceptsAsked,
   estimatedLevel,
-  remaining,
   isWorthAsking,
   nextDecision,
   type AnsweredItem,
@@ -118,6 +117,41 @@ describe('the item bank', () => {
     }
   })
 
+  /*
+   * Both of these guard defects found by auditing the bank after it was written, and both
+   * describe the same failure: an item that measures something other than the knowledge it
+   * claims to measure, while writing evidence that cannot be distinguished later from a real
+   * result.
+   */
+  it('does not put every correct answer in the same place', () => {
+    const choices = DIAGNOSTIC_ITEMS.filter((item) => item.kind === 'choice')
+    const positions = choices.map((item) => item.correctIndex)
+
+    // Every choice item used to answer at index 0. A learner who noticed could have scored
+    // full marks on every multiple choice without reading one of them, and the profile built
+    // from that would have looked exactly like understanding.
+    expect(new Set(positions).size, `positions: ${positions.join(', ')}`).toBeGreaterThanOrEqual(3)
+
+    for (const position of new Set(positions)) {
+      const share = positions.filter((other) => other === position).length / positions.length
+      expect(share, `position ${String(position)} holds ${String(share * 100)}% of answers`).toBeLessThanOrEqual(0.5)
+    }
+  })
+
+  it('does not make the correct answer the longest option', () => {
+    // Picking the longest option is a test-taking habit, not programming knowledge. An item
+    // that rewards it is measuring the habit.
+    for (const item of DIAGNOSTIC_ITEMS) {
+      if (item.kind !== 'choice') continue
+
+      const lengths = item.options.map((option) => option.length)
+      const longest = Math.max(...lengths)
+      expect(lengths[item.correctIndex], `${item.id}: "${item.options[item.correctIndex] ?? ''}"`).toBeLessThan(
+        longest,
+      )
+    }
+  })
+
   it('never attributes a misconception to the correct option', () => {
     for (const item of DIAGNOSTIC_ITEMS) {
       if (item.kind !== 'choice') continue
@@ -141,9 +175,18 @@ describe('the item bank', () => {
 
 describe('scoring a multiple choice', () => {
   const item = getDiagnosticItem('assign-vs-compare')
+  // Read from the data rather than written in. These used to be the literals 0 and 1, which
+  // quietly assumed the answer sat first — so moving it broke three tests that were really
+  // asserting the layout of the bank rather than the behaviour of the scorer.
+  const correct = String(item.kind === 'choice' ? item.correctIndex : 0)
+  const wrong = String(
+    item.kind === 'choice'
+      ? item.optionMisconceptions.findIndex((named) => named === 'assign-compares')
+      : 0,
+  )
 
   it('accepts the correct option', () => {
-    const verdict = scoreAnswer(item, '0')
+    const verdict = scoreAnswer(item, correct)
     expect(verdict).toEqual({
       kind: 'scored',
       correct: true,
@@ -153,7 +196,7 @@ describe('scoring a multiple choice', () => {
   })
 
   it('names the misconception behind a wrong choice', () => {
-    const verdict = scoreAnswer(item, '1')
+    const verdict = scoreAnswer(item, wrong)
     if (verdict.kind !== 'scored') throw new Error('expected a score')
 
     expect(verdict.correct).toBe(false)
@@ -161,9 +204,24 @@ describe('scoring a multiple choice', () => {
   })
 
   it('records no misconception for the correct answer, even where the data maps one', () => {
-    // Acting on a wrong idea cannot be what led them to the right answer.
-    const verdict = scoreAnswer(getDiagnosticItem('boolean-direct'), '0')
+    // Acting on a wrong idea cannot be what led them to the right answer. The bank no longer
+    // contains such an entry — an invariant forbids it — so the guard is exercised against a
+    // hand-made item, which is the only way to keep testing the code rather than the data.
+    const mislabelled: ChoiceItem = {
+      id: 'test-only',
+      kind: 'choice',
+      conceptId: 'variables-and-assignment',
+      difficulty: 0,
+      prompt: 'test',
+      options: ['right', 'wrong'],
+      correctIndex: 0,
+      optionMisconceptions: ['assign-compares', 'assign-compares'],
+      explanation: 'test',
+    }
+
+    const verdict = scoreAnswer(mislabelled, '0')
     if (verdict.kind !== 'scored') throw new Error('expected a score')
+    expect(verdict.correct).toBe(true)
     expect(verdict.misconceptions).toEqual([])
   })
 
@@ -504,54 +562,15 @@ describe('stopping', () => {
 })
 
 /*
- * The previous version of this told the learner "about 12" for the whole of a run that ended
- * at 7, and the test that was supposed to catch it compared a constant against itself. What is
- * asserted now is the property that actually matters: the range must contain the truth, and
- * neither end may move the wrong way.
+ * What the learner is told about length.
+ *
+ * There is no honest single number to count down to: the diagnostic stops as soon as it has
+ * enough breadth, which depends on which areas the remaining items happen to cover. So the
+ * interface states the ceiling and says it may stop sooner, and the only claim the planner
+ * makes about an individual question is whether it is the last — which is decidable in
+ * advance for two of the three stopping rules.
  */
 describe('what the learner is told about length', () => {
-  it('never promises more questions than the limit', () => {
-    expect(remaining({ answers: [], onboarding: BEGINNER }).most).toBeLessThanOrEqual(MAX_ITEMS)
-  })
-
-  it('starts by promising at least the minimum', () => {
-    expect(remaining({ answers: [], onboarding: BEGINNER }).least).toBe(MIN_ITEMS)
-  })
-
-  it('closes on the truth from both sides, and never widens', () => {
-    const answers: AnsweredItem[] = []
-    let previous = remaining({ answers, onboarding: BEGINNER })
-    let asked = 0
-
-    for (let step = 0; step < 20; step += 1) {
-      const decision = nextDecision({ answers, onboarding: BEGINNER })
-      if (decision.kind === 'finished') break
-
-      // The range always covers this question and every one still to come.
-      expect(previous.least).toBeGreaterThanOrEqual(0)
-      expect(previous.most).toBeGreaterThanOrEqual(previous.least)
-      expect(previous.most).toBeGreaterThanOrEqual(1)
-
-      answers.push({
-        itemId: decision.item.id,
-        conceptId: decision.item.conceptId,
-        correct: step % 2 === 0,
-      })
-      asked += 1
-
-      const now = remaining({ answers, onboarding: BEGINNER })
-      // One question nearer the end: the far end can only come closer, and the near end can
-      // only stay put or close in behind it.
-      expect(now.most).toBeLessThanOrEqual(previous.most)
-      expect(now.least).toBeLessThanOrEqual(previous.least)
-      previous = now
-    }
-
-    // And the range really did contain the answer: nothing is left to ask.
-    expect(remaining({ answers, onboarding: BEGINNER }).least).toBe(0)
-    expect(asked).toBeGreaterThanOrEqual(MIN_ITEMS)
-  })
-
   it('says the last question is the last one', () => {
     const answers: AnsweredItem[] = []
     const flags: boolean[] = []

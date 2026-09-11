@@ -6,11 +6,9 @@ import type { ConceptId, MisconceptionId } from '@/domain/curriculum/types'
 import { getDiagnosticItem } from '@/domain/diagnostic/items'
 import {
   nextDecision,
-  remaining,
   type AnsweredItem,
   type PlanDecision,
   type PlanState,
-  type RemainingRange,
 } from '@/domain/diagnostic/plan'
 import type { VerdictSource } from '@/domain/diagnostic/score'
 
@@ -111,23 +109,15 @@ function planStateFor(
   }
 }
 
-/** How many questions are still to come, as a range. See `remaining`. */
-export function remainingQuestions(
-  db: Db,
-  progress: DiagnosticProgress,
-  alsoUnavailable: readonly string[] = [],
-): RemainingRange {
-  return remaining(planStateFor(db, progress, alsoUnavailable))
-}
-
 /**
  * Sets an item aside without judging it.
  *
  * Reached only when marking genuinely could not happen — a written answer with no tutor to
- * read it. No response row is written and no evidence is derived, so the concept ends the
- * diagnostic `not-started` rather than wrongly `developing`. The record exists purely so the
- * planner stops offering an item it already knows it cannot mark, and so the summary can say
- * out loud that something was left unasked.
+ * read it, or the practical question in a browser where Python will not start. No response row
+ * is written and no evidence is derived, so the concept ends the diagnostic `not-started`
+ * rather than wrongly `developing`. The record exists purely so the planner stops offering an
+ * item it already knows it cannot mark, and so the summary can say out loud that something was
+ * left unasked.
  */
 export function skipItem(db: Db, sessionId: string, itemId: string): void {
   // Throws on an unknown id, so a malformed request cannot park arbitrary strings here.

@@ -1,0 +1,12 @@
+/*
+ * Inline code inside a sentence. Deliberately quiet: a tint and the mono face are enough to
+ * mark it as code without breaking the line up the way a border or a box would.
+ */
+.code {
+  padding: 0.1em 0.3em;
+  background-color: var(--ground-sunken);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  white-space: nowrap;
+}

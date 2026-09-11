@@ -3,15 +3,11 @@ import { redirect } from 'next/navigation'
 
 import { getDb } from '@/db/instance'
 import { requestNow } from '@/db/request-time'
-import {
-  decideNext,
-  openDiagnostic,
-  remainingQuestions,
-} from '@/db/repositories/diagnostic-repository'
+import { decideNext, openDiagnostic } from '@/db/repositories/diagnostic-repository'
 import { ensureLearner, readProfile } from '@/db/repositories/learner-repository'
 import { getConcept } from '@/domain/curriculum/graph'
 import { getDiagnosticItem } from '@/domain/diagnostic/items'
-import { conceptsAsked } from '@/domain/diagnostic/plan'
+import { MAX_ITEMS, conceptsAsked } from '@/domain/diagnostic/plan'
 import { presentItem } from '@/domain/diagnostic/present'
 import { tutorIsReachable, unmarkableItemIds } from '@/tutor/diagnostic-readiness'
 
@@ -115,19 +111,21 @@ export default function DiagnosticPage() {
   }
 
   const item = getDiagnosticItem(decision.item.id)
-  const left = remainingQuestions(db, progress, unmarkable)
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
         <p className={styles.eyebrow}>Short assessment</p>
         <h1>Question {decision.position}</h1>
+        {/*
+          The count is adaptive, so there is no honest number to count down to — and a filled
+          bar would have to invent one. What the learner actually needs is the ceiling and the
+          reason it may not be reached, which is two short sentences.
+        */}
         <p className={styles.progress} data-testid="progress">
           {decision.isLast
-            ? 'The last question.'
-            : left.least === left.most
-              ? `${String(left.most)} question${left.most === 1 ? '' : 's'} to go, including this one.`
-              : `Between ${String(left.least)} and ${String(left.most)} to go, including this one.`}
+            ? 'This is the last question.'
+            : `No more than ${String(MAX_ITEMS)} questions in all, and it stops as soon as your answers say enough.`}
         </p>
       </header>
 

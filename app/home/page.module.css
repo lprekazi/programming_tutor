@@ -1,5 +1,7 @@
 .page {
   max-width: var(--width-content);
+  /* Centred in the shell: see layout.module.css. */
+  margin-inline: auto;
 }
 
 .header {

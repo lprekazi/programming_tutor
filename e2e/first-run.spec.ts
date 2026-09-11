@@ -35,9 +35,9 @@ test.describe('first run', () => {
       experience: 'some-python',
     })
 
-    // The learner is told how much is left before they are told anything else — as a range,
-    // because a single number could only be arrived at by guessing.
-    await expect(page.getByTestId('progress')).toContainText('to go')
+    // The learner is told the ceiling and that it may end sooner, because the real count is
+    // adaptive and any single number would be a guess dressed up as a fact.
+    await expect(page.getByTestId('progress')).toContainText('No more than 12 questions')
 
     const asked = await completeDiagnostic(page, true)
     expect(asked.length).toBeGreaterThanOrEqual(7)
@@ -119,26 +119,25 @@ test.describe('first run', () => {
   })
 
   /*
-   * The progress line used to read "of about 12" for the whole of a run that ended at 7. What
-   * is checked now is that it never promises more than is left and never widens, and that the
-   * question announced as the last one really is.
+   * The progress line used to read "of about 12" for the whole of a run that ended at 7, and
+   * then "between 7 and 12 to go", which was true but read like a status bar talking to
+   * itself. What is checked now is that the learner is told the ceiling, is told it can end
+   * sooner, and that the question announced as the last one really is.
    */
-  test('tells the truth about how much is left', async ({ page }) => {
+  test('tells the truth about how long the assessment is', async ({ page }) => {
     await completeOnboarding(page, { goal: 'Learn loops', experience: 'some-python' })
 
-    let previousMost = Number.POSITIVE_INFINITY
     let sawLast = false
 
     for (let guard = 0; guard < 20; guard += 1) {
       if (await page.getByTestId('finish-diagnostic').isVisible()) break
 
       const line = await page.getByTestId('progress').innerText()
-      if (line.includes('The last question')) {
+      if (line.includes('the last question')) {
         sawLast = true
       } else {
-        const most = Math.max(...[...line.matchAll(/\d+/g)].map((match) => Number(match[0])))
-        expect(most, line).toBeLessThanOrEqual(previousMost)
-        previousMost = most
+        expect(line, line).toContain('No more than 12 questions')
+        expect(line, line).toContain('stops as soon as your answers say enough')
       }
 
       await answerCurrent(page, true)
@@ -175,13 +174,33 @@ test.describe('first run', () => {
     expect(await evidenceCount(page)).toBe(asked.length + 2)
   })
 
-  test('explains how each answer was marked', async ({ page }) => {
+  test('explains how each answer was marked, in the learner’s terms', async ({ page }) => {
     await completeOnboarding(page, { goal: 'Learn loops', experience: 'some-python' })
 
     await answerCurrent(page, false)
     await expect(page.getByTestId('verdict-heading')).toHaveText('Not quite.')
-    await expect(page.getByTestId('verdict-source')).toContainText('Recorded as one piece of')
     await expect(page.getByTestId('verdict-explanation')).not.toBeEmpty()
+
+    // What happened, and why it is worth their while — not how the tutor files it away.
+    await expect(page.getByTestId('verdict-source')).toContainText('what to practise')
+    await expect(page.getByTestId('verdict-source')).not.toContainText('evidence')
+  })
+
+  test('never shows the authoring syntax used to mark up inline code', async ({ page }) => {
+    await completeOnboarding(page, { goal: 'Learn loops', experience: 'regular-python' })
+
+    for (let guard = 0; guard < 20; guard += 1) {
+      if (await page.getByTestId('finish-diagnostic').isVisible()) break
+
+      // Backticks are how the item bank marks a variable or an operator inside a sentence.
+      // They are instructions to the renderer; a learner should never see one.
+      await expect(page.getByTestId('item-prompt')).not.toContainText('`')
+      await answerCurrent(page, false)
+      await expect(page.getByTestId('verdict-explanation')).not.toContainText('`')
+
+      await page.getByTestId('next-item').click()
+      await expect(page.getByTestId('next-item')).toBeHidden()
+    }
   })
 
   test('will not submit an empty answer', async ({ page }) => {

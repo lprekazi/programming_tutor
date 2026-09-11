@@ -105,10 +105,15 @@ const ITEMS: readonly DiagnosticItem[] = [
     conceptId: 'output-with-print',
     difficulty: -1.6,
     prompt: 'Which line displays the number stored in `count`?',
-    options: ['print(count)', 'print("count")', 'count.print()', 'display(count)'],
-    correctIndex: 0,
+    // `display(count)` used to sit here and was dropped: it is a NameError in a plain Python
+    // program but genuinely works in a notebook, so a learner who had only ever used Jupyter
+    // could be marked wrong for knowing something true. `print count` is wrong everywhere, and
+    // wrong for a reason worth surfacing — it is the Python 2 form.
+    options: ['print("count")', 'print(count)', 'count.print()', 'print count'],
+    correctIndex: 1,
     optionMisconceptions: [null, null, null, null],
-    explanation: 'print(count) shows the value; quoting the name would print the word "count".',
+    explanation:
+      '`print(count)` shows the value. Quoting the name prints the word `count` instead, and `print count` is the Python 2 form, which is a syntax error in Python 3.',
   },
   {
     id: 'read-traceback',
@@ -118,15 +123,15 @@ const ITEMS: readonly DiagnosticItem[] = [
     prompt: 'This program stops with an error. What went wrong?',
     code: 'numbers = [1, 2, 3]\nprint(numbers[5])',
     options: [
-      'There is no item at position 5',
       'The list has the wrong type',
       'print cannot show a list item',
+      'There is no item at position 5',
       'Lists start counting at 1, not 0',
     ],
-    correctIndex: 0,
+    correctIndex: 2,
     optionMisconceptions: [null, null, null, null],
     explanation:
-      'The list has three items, at positions 0, 1 and 2. Asking for position 5 raises an IndexError.',
+      'The list has three items, at positions 0, 1 and 2. Asking for position 5 raises an `IndexError`.',
   },
 
   // ---- variables and types ------------------------------------------------
@@ -136,12 +141,13 @@ const ITEMS: readonly DiagnosticItem[] = [
     conceptId: 'variables-and-assignment',
     difficulty: -1.3,
     prompt: 'Which line checks whether `total` is equal to 10?',
-    options: ['total == 10', 'total = 10', 'total := 10', 'total equals 10'],
-    correctIndex: 0,
-    // Index 0 is the correct answer, so it carries nothing: a learner who gets it right is
-    // not demonstrating the confusion the wrong answer demonstrates.
-    optionMisconceptions: [null, 'assign-compares', null, null],
-    explanation: '== compares. A single = assigns, which would set total to 10 instead.',
+    options: ['total = 10', 'total equals 10', 'total := 10', 'total == 10'],
+    correctIndex: 3,
+    // Only the wrong answer carries a misconception: getting it right demonstrates the absence
+    // of the confusion, not its presence.
+    optionMisconceptions: ['assign-compares', null, null, null],
+    explanation:
+      '`==` compares. A single `=` assigns, which would set `total` to 10 instead of checking it.',
   },
   {
     id: 'reassignment',
@@ -168,16 +174,31 @@ const ITEMS: readonly DiagnosticItem[] = [
   },
 
   // ---- expressions and conditionals ---------------------------------------
+  /*
+   * This item used to ask which of four ways to write `if` was "the clearest", with
+   * `if is_ready:` as the answer and `if is_ready == True:` among the distractors.
+   *
+   * All four options were valid Python and, for a boolean, all four behaved identically —
+   * verified by running them. The item measured which convention the author preferred, and
+   * marked three-quarters of learners wrong for choosing working code. A diagnostic that
+   * lowers an estimate over a style preference is measuring the wrong thing, and the evidence
+   * it writes is not recoverable later.
+   *
+   * Replaced with the fact that actually underlies the concept: a comparison is an expression
+   * that produces a value, and that value is a boolean.
+   */
   {
-    id: 'boolean-direct',
+    id: 'boolean-value',
     kind: 'choice',
     conceptId: 'booleans',
     difficulty: -0.8,
-    prompt: 'Which is the clearest way to run the block when `is_ready` is true?',
-    options: ['if is_ready:', 'if is_ready == True:', 'if is_ready is True:', 'if bool(is_ready):'],
-    correctIndex: 0,
-    optionMisconceptions: [null, 'comparison-with-bool-literal', 'comparison-with-bool-literal', null],
-    explanation: 'is_ready is already True or False, so it can be used on its own.',
+    prompt: 'What does `warm` hold after this runs?',
+    code: 'temperature = 15\nwarm = temperature > 20',
+    options: ['True', '15', 'False', 'Nothing — a comparison cannot be stored'],
+    correctIndex: 2,
+    optionMisconceptions: [null, null, null, null],
+    explanation:
+      'A comparison is worked out straight away and produces `True` or `False`. 15 is not greater than 20, so `warm` holds `False`.',
   },
   {
     id: 'if-else-once',
@@ -235,15 +256,18 @@ const ITEMS: readonly DiagnosticItem[] = [
     difficulty: 0.3,
     prompt: 'Why does this loop never finish?',
     code: 'n = 5\nwhile n > 0:\n    print(n)',
+    // Shortened from "n is never changed, so the condition stays true", which was by some way
+    // the longest option — and picking the longest option is a test-taking habit, not
+    // programming knowledge. All four now sit within three characters of each other.
     options: [
-      'n is never changed, so the condition stays true',
-      'while loops always need a break',
+      'Nothing in the loop changes n',
+      'A while loop always needs a break',
       'print stops n from being updated',
-      'The condition should use >= instead of >',
+      'The condition should use >= not >',
     ],
     correctIndex: 0,
     optionMisconceptions: [null, null, null, null],
-    explanation: 'Nothing inside the loop changes n, so n > 0 is true for ever.',
+    explanation: 'Nothing inside the loop changes `n`, so `n > 0` is true for ever.',
   },
 
   // ---- collections ---------------------------------------------------------
@@ -279,11 +303,11 @@ const ITEMS: readonly DiagnosticItem[] = [
     difficulty: 0.6,
     prompt: 'What does `result` hold after this runs?',
     code: 'def double(n):\n    print(n * 2)\n\nresult = double(4)',
-    options: ['None', '8', 'The text "8"', 'An error is raised'],
-    correctIndex: 0,
-    optionMisconceptions: [null, 'print-instead-of-return', 'print-instead-of-return', null],
+    options: ['8', 'None', 'The text "8"', 'An error is raised'],
+    correctIndex: 1,
+    optionMisconceptions: ['print-instead-of-return', null, 'print-instead-of-return', null],
     explanation:
-      'double prints but never returns, so the call gives back None. print shows a value; it does not hand one back.',
+      '`double` prints but never returns, so the call gives back `None`. `print` shows a value; it does not hand one back.',
   },
   {
     id: 'return-exits',

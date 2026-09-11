@@ -7,6 +7,7 @@ import { buildTestProgram, parseTestReport, type TestReport } from '@/domain/dia
 import type { PresentedItem } from '@/domain/diagnostic/present'
 import type { RunResult } from '@/python/protocol'
 import { PythonRunner, type RunnerStatus } from '@/python/runner'
+import { AuthoredText } from '@/ui/components/AuthoredText'
 
 import { skipDiagnosticItem, submitDiagnosticAnswer, type AnswerResult } from '../actions'
 import styles from './DiagnosticRunner.module.css'
@@ -45,10 +46,19 @@ interface LocalRun {
   readonly source: string
 }
 
+/**
+ * How the answer was marked, said plainly.
+ *
+ * The learner is told which of three very different things happened — a fixed answer, their
+ * own code running, or a model reading their words — because those carry different weight and
+ * pretending otherwise would be dishonest. What they are *not* told is how the tutor stores it:
+ * "recorded as one piece of evidence" is the application describing its own database, which
+ * tells a learner nothing they can act on.
+ */
 const MARKING: Readonly<Record<string, string>> = {
-  deterministic: 'Marked against the expected answer.',
-  execution: 'Marked by running your code against the checks.',
-  model: 'Read and marked by the tutor. A judgement, not a fixed answer.',
+  deterministic: 'Checked against the expected answer.',
+  execution: 'Checked by running your code against the checks.',
+  model: 'Read by the tutor, which is a judgement rather than a fixed answer.',
 }
 
 function runSummary(result: RunResult): string {
@@ -146,7 +156,7 @@ export function DiagnosticRunner({ item, isLast }: Props) {
       answer = String(choice)
     } else if (item.kind === 'code') {
       if (localRun === null) {
-        setProblem('Run your code first — this question is marked from what the checks do.')
+        setProblem('Run your code first — this question is judged on what the checks do.')
         return
       }
       answer = code
@@ -238,7 +248,7 @@ export function DiagnosticRunner({ item, isLast }: Props) {
   return (
     <div className={styles.runner} data-item-id={item.id} data-testid="diagnostic-item">
       <p className={styles.prompt} data-testid="item-prompt">
-        {item.prompt}
+        <AuthoredText value={item.prompt} />
       </p>
 
       {item.code !== null && (
@@ -468,15 +478,15 @@ export function DiagnosticRunner({ item, isLast }: Props) {
 
             {outcome.explanation.length > 0 && (
               <p className={styles.explanation} data-testid="verdict-explanation">
-                {outcome.explanation}
+                <AuthoredText value={outcome.explanation} />
               </p>
             )}
 
             <p className={styles.attribution} data-testid="verdict-source">
-              {MARKING[outcome.verdictSource] ?? 'Marked.'}{' '}
+              {MARKING[outcome.verdictSource] ?? 'Checked.'}{' '}
               {outcome.status === 'already-answered'
-                ? 'This question was already answered, so nothing was recorded again.'
-                : 'Recorded as one piece of evidence.'}
+                ? 'You had already answered this one, so your answer is unchanged.'
+                : 'This helps the tutor decide what to practise with you next.'}
             </p>
           </>
         )}

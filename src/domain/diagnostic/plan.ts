@@ -196,40 +196,6 @@ export function estimatedLevel(state: PlanState): number {
 }
 
 /**
- * How many items are left, as a range the learner can rely on.
- *
- * The previous version of this returned a single number and was quietly wrong. It was
- * `min(MAX_ITEMS, answered + stillAvailable)`, which with eighteen items in a bank capped at
- * twelve is simply twelve, every time — while a normal run stops at seven as soon as it has
- * enough breadth. The learner was told "1 of about 12" and shown the summary after the
- * seventh, which is exactly the sort of small lie a progress indicator exists not to tell.
- *
- * A single honest number is not available: whether the diagnostic stops at seven depends on
- * which areas the remaining items happen to cover, and whether it stops earlier still depends
- * on answers not yet given. So the range is reported instead. `least` can only rise and `most`
- * can only fall, so the two ends close on each other and neither ever moves the wrong way.
- */
-export interface RemainingRange {
-  /** The fewest further questions there could be, this one included. */
-  readonly least: number
-  /** The most there could be. */
-  readonly most: number
-}
-
-export function remaining(state: PlanState): RemainingRange {
-  const asked = state.answers.length
-  const available = DIAGNOSTIC_ITEMS.filter((item) => isWorthAsking(item, state)).length
-
-  const most = Math.max(0, Math.min(MAX_ITEMS, asked + available) - asked)
-
-  // The earliest it could stop is at the minimum, or now if the minimum is already passed —
-  // and never later than the most it could ask.
-  const least = Math.min(most, Math.max(0, MIN_ITEMS - asked))
-
-  return { least, most }
-}
-
-/**
  * Concepts the diagnostic asked about.
  *
  * Everything else stays `not-started`. Listed explicitly so the interface can say what was

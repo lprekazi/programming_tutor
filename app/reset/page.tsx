@@ -47,7 +47,7 @@ export default function ResetPage() {
           <li>What you said you wanted, and how you rated yourself.</li>
           <li>Your answers to the short assessment.</li>
           <li>
-            Every piece of evidence behind the tutor&rsquo;s picture of you —{' '}
+            Everything the tutor has worked out from your answers —{' '}
             <span data-testid="evidence-count">{evidenceCount}</span> so far.
           </li>
         </ul>
