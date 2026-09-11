@@ -6,8 +6,9 @@ its explanations, questions and practice to it.
 It runs locally, for one learner, with no accounts and no deployment.
 
 > **Status: early.** The foundations are in place — client-side Python execution, local
-> storage, the model-provider boundary and the design system. The tutoring experience
-> itself is being built milestone by milestone. See [Roadmap](#roadmap).
+> storage, the model-provider boundary, and the curriculum, learner model and scheduling
+> that the tutoring will be driven from. The learner-facing experience is being built
+> milestone by milestone. See [Roadmap](#roadmap).
 
 ## Why this exists
 
@@ -38,6 +39,15 @@ solutions in favour of explanation, questions and progressive hints.
 
 Working today:
 
+- A curriculum of 33 Python concepts as a prerequisite graph, covering everything from how a
+  program runs to classes and objects
+- A learner model that estimates understanding per concept from evidence, and can explain
+  every change it makes in plain language
+- Scheduling that decides what to work on next — and says why — never proposing a concept
+  whose prerequisites have not been demonstrated
+- Spaced review that brings weak and unsettled concepts back
+- A closed catalogue of Python misconceptions the tutor is allowed to name, mostly drawn
+  from a published inventory
 - Python execution in the browser via Pyodide, in an isolated worker
 - Run and Stop controls, with output streamed as it is produced
 - Endless programs terminated on demand or by a wall-clock budget, with a replacement
@@ -49,9 +59,9 @@ Working today:
   tests
 - A system-check page reporting the state of both
 
-Planned, milestone by milestone: onboarding and diagnostic assessment, the learner model,
-conversational tutoring, quizzes and code-reading questions, programming exercises with
-progressive hints, review scheduling, and optional grounding in uploaded study material.
+Planned, milestone by milestone: onboarding and diagnostic assessment, conversational tutoring,
+quizzes and code-reading questions, programming exercises with progressive hints, the learner-
+facing views, and optional grounding in uploaded study material.
 
 ## Architecture
 
@@ -183,7 +193,7 @@ is deterministic and needs no key. Testing against the live API is a manual step
 | Milestone | Scope |
 |---|---|
 | M0 | Foundations: execution, storage, provider boundary, design system ✅ |
-| M1 | Curriculum graph, learner model, scheduling |
+| M1 | Curriculum graph, learner model, evidence, scheduling ✅ |
 | M2 | Prompt architecture and the real provider |
 | M3 | Onboarding and diagnostic assessment |
 | M4 | Home, session view, conversational tutoring |
