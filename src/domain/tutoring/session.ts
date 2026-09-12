@@ -21,7 +21,15 @@ import { bandOf, evidenceStrengthOf } from '../learner-model/state'
  */
 export const MAX_MESSAGE_LENGTH = 2000
 
-export type TurnRole = 'tutor' | 'learner'
+/**
+ * Who or what a turn is.
+ *
+ * `activity` is a question the tutor asked. It sits in the same ordered sequence as the prose,
+ * which is what keeps evaluated checks inside the conversation rather than beside it — and
+ * means they inherit the M4 ordinal machinery for free: reserved before they exist, unique per
+ * position, and therefore impossible to duplicate by pressing a button twice.
+ */
+export type TurnRole = 'tutor' | 'learner' | 'activity'
 
 export type TurnStatus =
   /** Created, nothing has arrived yet. */
@@ -94,10 +102,32 @@ export function nextOrdinal(turns: readonly Turn[]): number {
   return turns.reduce((highest, turn) => Math.max(highest, turn.ordinal + 1), 0)
 }
 
+/**
+ * A reply that is still being written, if the conversation ends on one.
+ *
+ * Narrower than `unfinishedTutorTurn` on purpose, and the distinction matters. A turn that was
+ * stopped or that failed is *finished business* — there is nothing left to wait for — whereas
+ * `unfinishedTutorTurn` deliberately includes both so that a retry can be offered for them.
+ *
+ * Asking anything of the session while a reply is genuinely arriving would leave the learner
+ * with two things happening at once; refusing because an earlier reply failed would mean one
+ * failed provider call silently ended the tutor's ability to ask a question, which is what it
+ * did until a deterministic check turned out to be unreachable with no tutor configured.
+ */
+export function replyInProgress(turns: readonly Turn[]): Turn | null {
+  const last = [...turns].sort((a, b) => a.ordinal - b.ordinal).at(-1)
+  if (last === undefined || last.role !== 'tutor') return null
+
+  // Both states, because a turn is `pending` only until the first chunk arrives and
+  // `streaming` for the whole of the time a reply is actually being written. Checking only
+  // `pending` left the longer half of the window unguarded.
+  return last.status === 'pending' || last.status === 'streaming' ? last : null
+}
+
 /** The most recent turn awaiting or carrying tutor text, if the conversation ends on one. */
 export function unfinishedTutorTurn(turns: readonly Turn[]): Turn | null {
   const last = [...turns].sort((a, b) => a.ordinal - b.ordinal).at(-1)
-  if (last === undefined || last.role !== 'tutor') return null
+  if (last === undefined || (last.role !== 'tutor' && last.role !== 'activity')) return null
   return last.status === 'complete' ? null : last
 }
 

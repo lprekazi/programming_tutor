@@ -47,7 +47,7 @@ describe('a valid response passes straight through', () => {
     const outcome = await runStructured(provider, answerEvaluateStrategy, answerInput)
 
     expect(outcome.ok).toBe(true)
-    expect(outcome.value?.correct).toBe(true)
+    expect(outcome.value?.verdict).toBe('correct')
     expect(outcome.repairAttempted).toBe(false)
     expect(outcome.ok && outcome.source).toBe('model')
     expect(outcome.problems).toEqual([])
@@ -115,7 +115,7 @@ describe('invariant violations the schema cannot express', () => {
     const provider = fixtures.repairFails('answer.evaluate', {
       kind: 'value',
       value: {
-        correct: true,
+        verdict: 'correct',
         explanation: 'Right.',
         misconceptions: ['range-endpoint-inclusive'],
         nearMiss: false,

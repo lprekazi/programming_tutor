@@ -71,9 +71,57 @@ export interface BoundedConversation {
 
 export function conversationFor(turns: readonly Turn[]): BoundedConversation {
   return {
-    history: boundedHistory(turns).map((turn) => ({ role: turn.role, text: turn.text })),
+    history: boundedHistory(turns).map((turn) => ({
+      /*
+       * An evaluated check is something the tutor did, so it enters the history as a tutor
+       * turn. Its text is a compact record of the exchange — the question, the learner's
+       * answer and whether it was right — written by `summariseCheck` when the answer is
+       * recorded, and used only here.
+       *
+       * The interface never renders it: the page builds a check from `session_activity`, which
+       * holds the options, the feedback and the marking. This is the model's view, and the
+       * reason it exists is that a follow-up written without knowing the learner had just got
+       * something wrong is a follow-up that ignores the most useful thing in the session.
+       */
+      role: turn.role === 'learner' ? 'learner' : 'tutor',
+      text: turn.text,
+    })),
     trimmed: historyWasTrimmed(turns),
   }
+}
+
+/**
+ * The one-paragraph record of a check, for the tutor's context.
+ *
+ * Deliberately flat prose rather than a structured payload: it is going into a prompt, and a
+ * sentence is what a model reads best. The learner's own words are *not* included verbatim —
+ * they are quoted separately wherever they matter, and an unquoted copy riding inside a
+ * tutor-attributed turn would be an injection point.
+ */
+export function summariseCheck(input: {
+  readonly prompt: string
+  readonly marked: boolean
+  readonly correct: boolean
+  readonly partial: boolean
+  readonly misconceptions: readonly string[]
+}): string {
+  const outcome = !input.marked
+    ? 'Their answer could not be marked, so nothing was concluded from it.'
+    : input.correct
+      ? input.partial
+        ? 'They got it right, with part of the reasoning unstated.'
+        : 'They got it right.'
+      : 'They got it wrong.'
+
+  const named =
+    input.misconceptions.length === 0
+      ? ''
+      : ` What it showed: ${input.misconceptions.join(', ')}.`
+
+  return `You checked their understanding with this question:
+${input.prompt}
+
+${outcome}${named}`
 }
 
 /**

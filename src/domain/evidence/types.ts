@@ -27,6 +27,14 @@ export interface JudgedAttempt {
   readonly correct: boolean
   /** 0 when unaided; 1 upwards for each hint taken before answering. */
   readonly hintDepth: number
+  /**
+   * True when the answer was right but part of the reasoning was left unstated.
+   *
+   * Attenuated exactly as a hinted success is (ADR-0005) — but kept apart from `hintDepth`,
+   * because the two are different things and the record is read by the learner. Folding it
+   * into the depth made the evidence log say "after one hint" to somebody who had taken none.
+   */
+  readonly partial?: boolean | undefined
   /** Misconceptions observed, drawn from the closed catalogue. */
   readonly misconceptions: readonly MisconceptionId[]
   readonly observedAt: number

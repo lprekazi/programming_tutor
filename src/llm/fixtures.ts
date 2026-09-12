@@ -38,10 +38,50 @@ export const QUIZ_ON_RANGE: MockResponse = {
 export const ANSWER_CORRECT: MockResponse = {
   kind: 'value',
   value: {
-    correct: true,
+    verdict: 'correct',
     explanation:
       'That is right. range(3) stops before 3, so the loop runs with i as 0, 1 and 2.',
     misconceptions: [],
+    nearMiss: false,
+  },
+}
+
+/** The right conclusion with part of the reasoning unstated. A success, but a weaker one. */
+export const ANSWER_PARTIAL: MockResponse = {
+  kind: 'value',
+  value: {
+    verdict: 'partially-correct',
+    explanation:
+      'You have the right answer. You have not said *why* the loop stops before 3, which is the part worth being able to state.',
+    misconceptions: [],
+    nearMiss: false,
+  },
+}
+
+/**
+ * A judge that declines.
+ *
+ * The case a boolean could not express. An answer nobody could grade leaves no record either
+ * way, which costs the learner nothing and keeps a guess out of their profile.
+ */
+export const ANSWER_CANNOT_TELL: MockResponse = {
+  kind: 'value',
+  value: {
+    verdict: 'cannot-tell',
+    explanation:
+      'There is not enough here for me to tell whether the idea has landed. Say a little more about what the loop does on each pass.',
+    misconceptions: [],
+    nearMiss: false,
+  },
+}
+
+/** Declines, and still tries to deposit a diagnosis. Must be refused. */
+export const ANSWER_CANNOT_TELL_WITH_TAG: MockResponse = {
+  kind: 'value',
+  value: {
+    verdict: 'cannot-tell',
+    explanation: 'I cannot tell.',
+    misconceptions: ['range-endpoint-inclusive'],
     nearMiss: false,
   },
 }
@@ -50,7 +90,7 @@ export const ANSWER_CORRECT: MockResponse = {
 export const ANSWER_SHOWS_MISCONCEPTION: MockResponse = {
   kind: 'value',
   value: {
-    correct: false,
+    verdict: 'incorrect',
     explanation:
       'Not quite. You have included 3, but range(3) stops just before 3 — it gives you 0, 1 and 2.',
     misconceptions: ['range-endpoint-inclusive'],
@@ -129,7 +169,7 @@ export const DIAGNOSIS: MockResponse = {
 /** Fails the schema: a required field is missing. */
 export const INVALID_MISSING_FIELD: MockResponse = {
   kind: 'value',
-  value: { correct: true, misconceptions: [], nearMiss: false },
+  value: { verdict: 'correct', misconceptions: [], nearMiss: false },
 }
 
 /** Passes the schema, fails an invariant: two options are the same. */
@@ -159,7 +199,7 @@ export const INVALID_UNKNOWN_CONCEPT: MockResponse = {
 export const INVALID_UNKNOWN_MISCONCEPTION: MockResponse = {
   kind: 'value',
   value: {
-    correct: false,
+    verdict: 'incorrect',
     explanation: 'That is not right.',
     misconceptions: ['forgot-the-semicolons'],
     nearMiss: false,
@@ -185,7 +225,7 @@ export const INVALID_NONSENSE: MockResponse = {
 export const INVALID_OVERSIZED: MockResponse = {
   kind: 'value',
   value: {
-    correct: true,
+    verdict: 'correct',
     explanation: 'x'.repeat(10_000),
     misconceptions: [],
     nearMiss: false,
@@ -386,6 +426,41 @@ export function flakyTutor(): TutorProvider {
       return inner.streamText(request, signal)
     },
   }
+}
+
+/**
+ * A generated question that would fail its own invariants.
+ *
+ * Two correct-looking options and a misconception on the correct one. Exists to prove that a
+ * question this broken is never shown — a broken assessment item is worse than no check.
+ */
+export const QUIZ_MISCONCEPTION_ON_CORRECT: MockResponse = {
+  kind: 'value',
+  value: {
+    question: 'What does range(3) produce?',
+    options: ['0 1 2', '1 2 3', '0 1 2 3', '3'],
+    correctIndex: 0,
+    distractorMisconceptions: ['range-endpoint-inclusive', null, null, null],
+    explanation: 'range(3) gives 0, 1 and 2.',
+  },
+}
+
+/**
+ * A generated question naming a misconception that is not in the catalogue.
+ *
+ * The failure this guards against is quiet: the question reads perfectly well, and a learner
+ * choosing that option would have a diagnosis recorded against them under an id nothing else
+ * in the system knows about. It would never be revisited, never probed, and never explained.
+ */
+export const QUIZ_UNKNOWN_MISCONCEPTION: MockResponse = {
+  kind: 'value',
+  value: {
+    question: 'What does this print?\n\nfor i in range(3):\n    print(i)',
+    options: ['0 1 2', '1 2 3', '0 1 2 3', '3'],
+    correctIndex: 0,
+    distractorMisconceptions: [null, 'counts-from-one-by-default', null, null],
+    explanation: 'range(3) gives 0, 1 and 2.',
+  },
 }
 
 /** A provider wired for an ordinary, successful tutoring exchange. */

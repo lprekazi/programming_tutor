@@ -125,15 +125,23 @@ export type MisconceptionSource =
     }
 
 export type MisconceptionId =
+  // fundamentals
+  | 'statements-run-out-of-order'
+  | 'error-means-the-last-line'
   // assignment and variables
   | 'assign-compares'
   | 'variables-hold-expressions'
   | 'variables-hold-objects'
   | 'assignment-copies-object'
+  | 'reserved-word-as-name'
+  | 'string-literal-needs-str'
   // expressions and booleans
   | 'comparison-with-bool-literal'
   | 'map-to-boolean-with-if'
   | 'no-short-circuit'
+  | 'no-single-logic-and'
+  | 'no-atomic-expression'
+  | 'precedence-is-left-to-right'
   | 'division-operator-confusion'
   // conditionals
   | 'conditional-is-sequence'
@@ -141,14 +149,33 @@ export type MisconceptionId =
   // loops
   | 'range-endpoint-inclusive'
   | 'accumulator-overwritten'
+  | 'break-leaves-all-loops'
+  | 'continue-ends-the-loop'
+  | 'inner-loop-runs-once'
   // functions
   | 'deferred-return'
   | 'return-unwinds-multiple-frames'
   | 'multiple-values-return'
   | 'print-instead-of-return'
+  | 'return-call'
+  | 'parentheses-only-if-argument'
+  | 'outside-in-function-nesting'
+  | 'local-name-visible-outside'
   // collections
   | 'string-immutability-ignored'
   | 'index-starts-at-one'
+  | 'dict-is-ordered-by-key'
+  | 'iterating-gives-positions'
+  // debugging
+  | 'reading-instead-of-checking'
+  // object-oriented
+  | 'init-creates'
+  | 'init-returns-object'
+  | 'no-empty-init'
+  | 'objects-must-be-named'
+  | 'self-assignable'
+  | 'self-no-expression'
+  | 'cannot-chain-attribute-accesses'
 
 export interface Misconception {
   readonly id: MisconceptionId

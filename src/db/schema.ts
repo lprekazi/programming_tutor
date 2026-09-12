@@ -237,6 +237,21 @@ export const tutoringSession = sqliteTable(
     openedReason: text('opened_reason').notNull(),
     startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull().default(now),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(now),
+    /**
+     * When the learner last sat down with this concept.
+     *
+     * A session is unique per concept and is reopened rather than replaced, so `startedAt` is
+     * the first time they ever opened it and the conversation grows for the life of the
+     * profile. Anything that should be "per sitting" rather than "for ever" — how many
+     * questions have been asked, in particular — is counted from here.
+     */
+    /*
+     * The zero default is not a meaningful time, and nothing reads it as one: both writers
+     * (`openSession` and `reopenSession`) always supply a value. It is a constant because
+     * SQLite cannot add a NOT NULL column to a populated table with a computed default, and
+     * the migration backfills every existing row from `started_at`.
+     */
+    resumedAt: integer('resumed_at', { mode: 'timestamp_ms' }).notNull().default(sql`0`),
     /** Set when the learner says they are done with this concept for now. */
     closedAt: integer('closed_at', { mode: 'timestamp_ms' }),
   },
@@ -353,4 +368,146 @@ export const llmCall = sqliteTable(
     at: integer('at', { mode: 'timestamp_ms' }).notNull().default(now),
   },
   (table) => [index('llm_call_by_time').on(table.learnerId, table.at)],
+)
+
+/**
+ * An evaluated activity: a question the tutor asked inside a session.
+ *
+ * Stored in full, including its answer key, because the answer key must never reach the
+ * browser — the same rule the diagnostic follows, for the same reason. The learner-facing view
+ * is built by `presentActivity`, and a test asserts over the whole bank that no
+ * answer-bearing field survives that trip.
+ *
+ * `turn_id` is unique, so an activity occupies exactly one position in the conversation and
+ * inherits the M4 ordinal machinery: the turn is reserved first, and there is no way to attach
+ * two activities to one moment.
+ *
+ * The options are stored **as presented**, after shuffling. What the learner saw is what is
+ * marked and what is shown back to them; re-deriving the order later would risk marking
+ * against an arrangement they never saw.
+ */
+export const sessionActivity = sqliteTable(
+  'session_activity',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => tutoringSession.id, { onDelete: 'cascade' }),
+    /** The turn this activity occupies. Unique: one activity per position. */
+    turnId: text('turn_id').notNull(),
+    conceptId: text('concept_id').notNull(),
+    /** `choice`, `predict-output` or `short-response`. */
+    kind: text('kind').notNull(),
+    /** The authored item this came from, or null when it was generated. */
+    itemId: text('item_id'),
+    /** `authored` or `generated`. Recorded because it changes how much to trust the item. */
+    origin: text('origin').notNull(),
+    prompt: text('prompt').notNull(),
+    code: text('code'),
+    /** Options as presented, already shuffled. Null for anything but a choice. */
+    options: text('options', { mode: 'json' }).$type<string[]>(),
+    /** Index into the presented order. Null for anything but a choice. */
+    correctIndex: integer('correct_index'),
+    /** Per-option misconceptions, in the presented order. Null for anything but a choice. */
+    optionMisconceptions: text('option_misconceptions', { mode: 'json' }).$type<(string | null)[]>(),
+    /** For an output prediction. Never sent to the browser. */
+    expectedOutput: text('expected_output'),
+    /** Known wrong answers worth recognising, as JSON. Never sent to the browser. */
+    knownWrongAnswers: text('known_wrong_answers', { mode: 'json' }).$type<
+      { answer: string; misconception: string }[]
+    >(),
+    /** What a good written answer contains. Given to the judge; never shown before answering. */
+    expectedPoints: text('expected_points'),
+    /** Why the right answer is right. Shown after answering. */
+    explanation: text('explanation').notNull(),
+    /**
+     * Why this activity was chosen, from the selector's own grounds.
+     *
+     * Stored rather than recomputed. The reason shown to the learner has to be the reason that
+     * actually applied when the question was asked; recomputing it later would quietly rewrite
+     * it as their state moved on.
+     */
+    selectionGround: text('selection_ground').notNull(),
+    /** The misconception being probed, where that was the ground. */
+    probesMisconception: text('probes_misconception'),
+    /** Provenance for a generated item. Null when authored. */
+    strategyId: text('strategy_id'),
+    strategyVersion: text('strategy_version'),
+    model: text('model'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [unique('session_activity_unique_turn').on(table.turnId)],
+)
+
+/**
+ * One attempt at one activity.
+ *
+ * `activity_id` is unique, and that single constraint is what makes "a learner never receives
+ * two mastery updates from one answer" a property of the database rather than a promise about
+ * the interface. Evidence is derived only when this insert actually creates a row, so a
+ * double-click, a refresh mid-request, a replayed action or a retry after a provider failure
+ * all reach the same row and change nothing the second time.
+ *
+ * A second *attempt* at the same question is deliberately not possible. Answering again after
+ * feedback is not independent evidence, and treating it as such would let a learner walk a band
+ * upwards by guessing. When another go is warranted the tutor asks a different question.
+ */
+export const activityAttempt = sqliteTable(
+  'activity_attempt',
+  {
+    id: text('id').primaryKey(),
+    activityId: text('activity_id')
+      .notNull()
+      .references(() => sessionActivity.id, { onDelete: 'cascade' }),
+    /** Exactly what the learner submitted. Untrusted text, stored verbatim. */
+    response: text('response').notNull(),
+    /**
+     * `marked` or `unmarked`.
+     *
+     * An unmarked attempt is kept, shown to the learner as unmarked, and produces no evidence.
+     * A safe unmarked result is better than false evidence.
+     */
+    outcome: text('outcome').notNull(),
+    correct: integer('correct', { mode: 'boolean' }),
+    /** True when the answer was right with part of the reasoning missing. */
+    partial: integer('partial', { mode: 'boolean' }).notNull().default(false),
+    /** `deterministic` or `model`. What marked it, so the learner can be told. */
+    markingSource: text('marking_source'),
+    /** Why it could not be marked, where it could not. */
+    unmarkedReason: text('unmarked_reason'),
+    /** Misconceptions observed in this attempt, as JSON. */
+    misconceptions: text('misconceptions', { mode: 'json' }).$type<string[]>().notNull(),
+    /** How many hints were taken first. Attenuates positive evidence; never a penalty. */
+    hintDepth: integer('hint_depth').notNull().default(0),
+    /** The feedback shown. Stored so the learner sees the same words on a reload. */
+    feedback: text('feedback').notNull(),
+    attemptedAt: integer('attempted_at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [unique('activity_attempt_unique_activity').on(table.activityId)],
+)
+
+/**
+ * A hint the learner asked for, on one activity.
+ *
+ * M5 allows one restrained step; the full ladder is M6. Recorded separately from the attempt so
+ * that asking for help is a visible event in its own right rather than only a number attached
+ * to an answer — and because ADR-0005 treats support as information about *how* a success was
+ * reached, not as a penalty for needing it.
+ */
+export const activityHint = sqliteTable(
+  'activity_hint',
+  {
+    id: text('id').primaryKey(),
+    activityId: text('activity_id')
+      .notNull()
+      .references(() => sessionActivity.id, { onDelete: 'cascade' }),
+    /** 1 for the single step M5 offers. */
+    depth: integer('depth').notNull(),
+    text: text('text').notNull(),
+    strategyId: text('strategy_id'),
+    strategyVersion: text('strategy_version'),
+    model: text('model'),
+    askedAt: integer('asked_at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [unique('activity_hint_unique_depth').on(table.activityId, table.depth)],
 )

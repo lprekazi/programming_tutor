@@ -9,6 +9,7 @@ import {
   countEvidence,
   ensureLearner,
   readConceptStates,
+  readEvidenceFor,
   readProfile,
 } from '@/db/repositories/learner-repository'
 import { getConcept } from '@/domain/curriculum/graph'
@@ -83,6 +84,33 @@ const STRENGTH_LABELS: Readonly<Record<EvidenceStrength, string>> = {
   strong: 'plenty of answers',
 }
 
+/** How many dated entries to show before summarising the rest. */
+const EVIDENCE_SHOWN = 5
+
+/**
+ * A recorded band, in the same words the list above uses.
+ *
+ * Narrowed rather than cast: the column is free text, and a value the current band vocabulary
+ * no longer knows is shown as itself rather than mapped to something it is not.
+ */
+function bandWord(band: string): string {
+  return isBand(band) ? BAND_LABELS[band].toLowerCase() : band
+}
+
+function isBand(value: string): value is Band {
+  return Object.prototype.hasOwnProperty.call(BAND_LABELS, value)
+}
+
+/**
+ * The day an answer was given.
+ *
+ * Day rather than time: the exact minute is noise, and a learner reading their own history
+ * wants to know whether this was today or last week.
+ */
+function formatDay(at: Date): string {
+  return at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
 const BAND_CLASS: Readonly<Record<Band, string>> = {
   'not-started': styles.bandNotStarted ?? '',
   'needs-review': styles.bandNeedsReview ?? '',
@@ -119,7 +147,10 @@ export default function HomePage() {
 
   const states = readConceptStates(db)
   const evidenceCount = countEvidence(db)
-  const responses = readResponses(db, openDiagnostic(db, now).sessionId)
+  // Split rather than summed: where the picture came from is more informative than how much
+  // of it there is, and the two sources mean different things.
+  const diagnosticAnswers = readResponses(db, openDiagnostic(db, now).sessionId).length
+  const sessionAnswers = Math.max(0, evidenceCount - diagnosticAnswers)
   const assessed = states.filter((state) => bandOf(state) !== 'not-started')
   const lookup = stateLookupFrom(states)
   const selection = selectNextConcept(lookup, now)
@@ -132,8 +163,13 @@ export default function HomePage() {
         <p className={styles.eyebrow}>Where you are</p>
         <h1>What the tutor knows so far</h1>
         <p className={styles.lead}>
-          Built from {evidenceCount} {evidenceCount === 1 ? 'answer' : 'answers'} you gave in the
-          short assessment. It is a starting point, not a verdict, and it changes as you work.
+          {/*
+            Every answer, not only the assessment's. M5 added questions inside sessions, and a
+            sentence that still said "in the short assessment" would have been quietly
+            undercounting the learner's own work from the moment they answered one.
+          */}
+          Built from {evidenceCount} {evidenceCount === 1 ? 'answer' : 'answers'} you have given
+          so far. It is a starting point, not a verdict, and it changes as you work.
         </p>
       </header>
 
@@ -190,7 +226,7 @@ export default function HomePage() {
         <p className={styles.body} data-testid="assessed-count">
           {assessed.length === 0
             ? 'Nothing yet.'
-            : `${assessed.length} of ${states.length} concepts, from ${responses.length} ${responses.length === 1 ? 'question' : 'questions'}.`}{' '}
+            : `${assessed.length} of ${states.length} concepts, from ${String(diagnosticAnswers)} assessment ${diagnosticAnswers === 1 ? 'question' : 'questions'} and ${String(sessionAnswers)} since.`}{' '}
           Everything else is untouched — not weak, not strong, simply unknown.
         </p>
       </section>
@@ -206,8 +242,10 @@ export default function HomePage() {
             <ul className={styles.concepts}>
               {group.concepts.map(({ state, title }) => {
                 const band = bandOf(state)
-                return (
-                  <li className={styles.concept} key={state.conceptId}>
+                const history = readEvidenceFor(db, state.conceptId)
+
+                const row = (
+                  <>
                     <span className={styles.conceptTitle}>{title}</span>
                     <span
                       className={`${styles.band} ${BAND_CLASS[band]}`}
@@ -219,6 +257,70 @@ export default function HomePage() {
                     <span className={styles.strength}>
                       {STRENGTH_LABELS[evidenceStrengthOf(state)]}
                     </span>
+                  </>
+                )
+
+                /*
+                 * A concept with nothing behind it has nothing to disclose, so it stays a plain
+                 * row rather than a control that opens onto an empty list.
+                 */
+                if (history.length === 0) {
+                  return (
+                    <li className={styles.concept} key={state.conceptId}>
+                      {row}
+                    </li>
+                  )
+                }
+
+                return (
+                  <li className={styles.conceptWithHistory} key={state.conceptId}>
+                    <details className={styles.history}>
+                      <summary
+                        className={styles.concept}
+                        data-testid={`history-${state.conceptId}`}
+                      >
+                        {row}
+                      </summary>
+
+                      {/*
+                        Why the band says what it says.
+
+                        One dated line per answer, with the reason the domain recorded when it
+                        made the change — not a sentence written here to sound plausible. Where a
+                        band moved, it says which way; where it did not, it says the answer was
+                        recorded and the band held, because one answer usually should not move it.
+                      */}
+                      <ol className={styles.evidence} data-testid={`evidence-${state.conceptId}`}>
+                        {history.slice(0, EVIDENCE_SHOWN).map((entry) => (
+                          <li className={styles.evidenceEntry} key={entry.id}>
+                            <span className={styles.evidenceWhen}>
+                              {formatDay(entry.observedAt)}
+                            </span>
+                            <span className={styles.evidenceWhat}>
+                              {/*
+                                The reason as the domain recorded it, verbatim. It already names
+                                the move where there was one, so nothing is appended in that
+                                case — saying it twice was the first thing the browser showed.
+                                Where the band held, that is worth saying out loud, because a
+                                learner watching a single answer change nothing needs to know
+                                it was still counted.
+                              */}
+                              {entry.reason}
+                              {entry.priorBand === entry.posteriorBand
+                                ? ` Counted; ${bandWord(entry.posteriorBand)} still fits.`
+                                : ''}
+                            </span>
+                          </li>
+                        ))}
+                      </ol>
+
+                      {history.length > EVIDENCE_SHOWN && (
+                        <p className={styles.evidenceMore}>
+                          {history.length - EVIDENCE_SHOWN} earlier{' '}
+                          {history.length - EVIDENCE_SHOWN === 1 ? 'answer' : 'answers'} not shown.
+                        </p>
+                      )}
+                    </details>
                   </li>
                 )
               })}

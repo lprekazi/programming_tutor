@@ -9,6 +9,7 @@ import {
   isReturning,
   nextOrdinal,
   pitchFor,
+  replyInProgress,
   unfinishedTutorTurn,
   type Turn,
 } from './session'
@@ -118,6 +119,38 @@ describe('an unfinished tutor turn', () => {
 
   it('is not reported when the learner spoke last', () => {
     expect(unfinishedTutorTurn([turn({ ordinal: 0, role: 'learner' })])).toBeNull()
+  })
+})
+
+/*
+ * The narrower question, and why both exist.
+ *
+ * `unfinishedTutorTurn` includes a reply that failed, because a failed reply is exactly what a
+ * retry is offered for. `replyInProgress` must not, because one failed provider call was
+ * otherwise enough to stop the tutor asking a question for the rest of the session — and a
+ * deterministic question needs no provider at all.
+ */
+describe('a reply still being written', () => {
+  it('is found while it is pending', () => {
+    const turns = [turn({ ordinal: 0 }), turn({ ordinal: 1, status: 'pending', text: '' })]
+    expect(replyInProgress(turns)?.ordinal).toBe(1)
+  })
+
+  it('is not a reply that failed, which is finished business', () => {
+    const turns = [turn({ ordinal: 0 }), turn({ ordinal: 1, status: 'failed', text: 'part' })]
+
+    expect(unfinishedTutorTurn(turns)?.ordinal).toBe(1)
+    expect(replyInProgress(turns)).toBeNull()
+  })
+
+  it('is not a reply the learner stopped', () => {
+    const turns = [turn({ ordinal: 0, status: 'cancelled', text: 'half of it' })]
+    expect(replyInProgress(turns)).toBeNull()
+  })
+
+  it('is not an unanswered question, which the activity path handles itself', () => {
+    const turns = [turn({ ordinal: 0, role: 'activity', status: 'pending', text: '' })]
+    expect(replyInProgress(turns)).toBeNull()
   })
 })
 

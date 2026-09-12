@@ -63,6 +63,8 @@ export {
 
 export * from './diagnostic'
 
+export * from './assessment'
+
 export {
   CONTEXT_TURNS,
   MAX_MESSAGE_LENGTH,

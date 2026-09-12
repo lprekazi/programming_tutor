@@ -46,8 +46,9 @@ Working today:
 - Scheduling that decides what to work on next — and says why — never proposing a concept
   whose prerequisites have not been demonstrated
 - Spaced review that brings weak and unsettled concepts back
-- A closed catalogue of Python misconceptions the tutor is allowed to name, mostly drawn
-  from a published inventory
+- A closed catalogue of 42 Python misconceptions the tutor is allowed to name, covering every
+  concept — 26 drawn from a published inventory, the rest marked in the data as this project's
+  own hypotheses rather than sourced claims
 - Python execution in the browser via Pyodide, in an isolated worker
 - Run and Stop controls, with output streamed as it is produced
 - Endless programs terminated on demand or by a wall-clock budget, with a replacement
@@ -58,10 +59,28 @@ Working today:
 - Verification harness that checks a generated exercise's reference solution against its own
   tests
 - A system-check page reporting the state of both
+- A prompt architecture of ordered blocks — stable policy and curriculum first, learner state
+  and task last — with nine strategies, each carrying its own schema, invariants and decision
+  about what to do when the model returns something unusable
+- Structured model output validated, repaired once, then either failed visibly or replaced by a
+  safe fallback — never coerced, never silently wrong
+- First-run onboarding and a short adaptive diagnostic that initialises the learner model from
+  answers rather than from self-report
+- Conversational tutoring with streamed replies, pitched at what the learner has demonstrated,
+  cancellable, and recoverable when the provider fails
+- Questions asked inside the lesson — multiple choice, "what does this print?", and written
+  explanations — chosen from the learner model, with the reason for asking shown
+- Deterministic marking wherever the answer is not prose, so assessment works with no provider
+  configured at all
+- Feedback that names the wrong idea an answer fits and what Python actually does, composed from
+  the item and the catalogue so it cannot contradict the mark
+- One nudge per question, which counts for less than working it out unaided and never against
+  the learner
+- A profile that shows, per concept, the dated answers behind every change
 
-Planned, milestone by milestone: onboarding and diagnostic assessment, conversational tutoring,
-quizzes and code-reading questions, programming exercises with progressive hints, the learner-
-facing views, and optional grounding in uploaded study material.
+Planned, milestone by milestone: programming and debugging exercises with a full hint ladder, the
+review and export views, accessibility hardening, evaluation, and optional grounding in uploaded
+study material.
 
 ## Architecture
 
@@ -187,6 +206,14 @@ is deterministic and needs no key. Testing against the live API is a manual step
   been carried out and no such claim is made.
 - **Not an evaluated educational intervention.** No study, control group or learning-outcome
   measurement supports it.
+- **A written answer needs a model, and may go unmarked.** Multiple-choice and output-prediction
+  questions are marked against the item's own answer. A written explanation is read by the model,
+  which is allowed to say it cannot tell — and when it says so, or when no provider is
+  reachable, the answer is kept, shown as unmarked, and changes nothing about the learner. An
+  unmarked answer is better than an invented one.
+- **Ten of 33 concepts have no authored question.** A check on one of those is generated, and a
+  generated question that fails validation is not asked at all, so the tutor sometimes has
+  nothing to ask.
 
 ## Roadmap
 
@@ -194,10 +221,10 @@ is deterministic and needs no key. Testing against the live API is a manual step
 |---|---|
 | M0 | Foundations: execution, storage, provider boundary, design system ✅ |
 | M1 | Curriculum graph, learner model, evidence, scheduling ✅ |
-| M2 | Prompt architecture and the real provider |
-| M3 | Onboarding and diagnostic assessment |
-| M4 | Home, session view, conversational tutoring |
-| M5 | Quizzes, code reading, evaluation and feedback |
+| M2 | Prompt architecture and the real provider ✅ |
+| M3 | Onboarding and diagnostic assessment ✅ |
+| M4 | Home, session view, conversational tutoring ✅ |
+| M5 | Quizzes, code reading, evaluation and feedback ✅ |
 | M6 | Programming exercises, execution and progressive hints |
 | M7 | Review scheduling, persistence, reset and export |
 | M8 | Accessibility, responsiveness and hardening |

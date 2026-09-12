@@ -4,8 +4,10 @@ import { redirect } from 'next/navigation'
 
 import { getDb } from '@/db/instance'
 import { ensureLearner, readProfile } from '@/db/repositories/learner-repository'
+import { readSessionActivities } from '@/db/repositories/activity-repository'
 import { readSession } from '@/db/repositories/session-repository'
 import { requestNow } from '@/db/request-time'
+import { presentActivity } from '@/domain/assessment/present'
 import { getConcept } from '@/domain/curriculum/graph'
 import { resolveProvider } from '@/llm/resolve'
 
@@ -42,6 +44,30 @@ export default async function SessionPage({
   const concept = getConcept(session.conceptId)
   const provider = resolveProvider()
 
+  /*
+   * Checks are looked up by the turn they sit on, so the runner can interleave them with the
+   * prose in one ordered sequence. The answer key is stripped here, on the server, by
+   * `presentActivity` — the browser is sent the question and nothing it could mark itself with.
+   */
+  const checks = readSessionActivities(db, session.id).map((activity) => ({
+    turnId: activity.turnId,
+    presented: presentActivity(activity),
+    hint: activity.hints.find((each) => each.depth === 1)?.text ?? null,
+    answered:
+      activity.attempt === null
+        ? null
+        : {
+            response: activity.attempt.response,
+            marked: activity.attempt.marked,
+            correct: activity.attempt.correct === true,
+            partial: activity.attempt.partial,
+            markedBy: activity.attempt.markingSource,
+            unmarkedReason: activity.attempt.unmarkedReason,
+            feedback: activity.attempt.feedback,
+            hintDepth: activity.attempt.hintDepth,
+          },
+  }))
+
   return (
     <div className={styles.page}>
       <nav className={styles.breadcrumb}>
@@ -69,9 +95,19 @@ export default async function SessionPage({
       )}
 
       <SessionRunner
+        checks={checks}
         conceptTitle={concept.title}
         sessionId={session.id}
-        turns={session.turns}
+        /*
+         * An activity turn's text is a record for the model — what was asked, how it went, and
+         * the ids of any misconceptions it showed. The page renders the check itself in that
+         * turn's place and never reads the text, but passing it anyway put internal
+         * vocabulary into the serialised payload of a page whose rule is that it stays on the
+         * server. Emptied here rather than filtered out, so the turn keeps its position.
+         */
+        turns={session.turns.map((turn) =>
+          turn.role === 'activity' ? { ...turn, text: '' } : turn,
+        )}
       />
     </div>
   )

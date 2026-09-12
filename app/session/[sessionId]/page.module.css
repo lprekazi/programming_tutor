@@ -236,3 +236,176 @@
     margin-left: 0;
   }
 }
+
+/* ---- checking understanding ----------------------------------------------- */
+
+/*
+ * A check is part of the lesson, not a quiz inserted into it.
+ *
+ * So: the same column, the same micro-label treatment as a tutor turn, a hairline rule for
+ * separation, and no card. Deliberately absent — a score, a streak, a badge, a percentage, a
+ * coloured tile per option, and any animation on being right. None of those would help anybody
+ * understand a for loop, and the brief rules them out.
+ */
+.checkTurn {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5) 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.check {
+  display: grid;
+  gap: var(--space-3);
+}
+
+/* Why the tutor is asking, in the scheduler's own words. Quiet, and on the page. */
+.checkGround {
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/*
+ * Line breaks survive.
+ *
+ * An authored question keeps its code in `code`, rendered in its own block. A generated one has
+ * nowhere else to put a snippet, so it arrives inside the prompt — where collapsing whitespace
+ * turned indented Python into one unreadable line.
+ */
+.prompt {
+  max-width: var(--measure-prose);
+  font-family: var(--font-serif);
+  font-size: var(--text-lg);
+  line-height: var(--leading-snug);
+  white-space: pre-wrap;
+}
+
+.code {
+  padding: var(--space-4);
+  overflow-x: auto;
+  background-color: var(--ground-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  tab-size: 4;
+  white-space: pre;
+}
+
+.fieldset {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.fieldset:disabled {
+  opacity: 0.75;
+}
+
+.options {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.option {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  /* Comfortably past the 24px minimum target size, and the whole row is the target. */
+  min-height: 2.75rem;
+  padding: var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.option:hover {
+  background-color: var(--ground-sunken);
+}
+
+.option:has(input:checked) {
+  border-color: var(--rule-strong);
+  background-color: var(--surface);
+}
+
+.bad {
+  color: var(--negative);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* One nudge, set apart from the question without being dressed up as a prize. */
+.hint {
+  max-width: var(--measure-prose);
+  padding-left: var(--space-4);
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.hintLabel {
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+/*
+ * The verdict.
+ *
+ * A word first, colour second. "Right" and "Not right" are readable with no colour perception
+ * at all, and the left rule is a second non-colour cue; the tint is the third. Nothing here
+ * depends on telling green from red.
+ */
+.verdictGood,
+.verdictBad,
+.verdictUnmarked {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-left: 2px solid;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.verdictGood {
+  background-color: var(--positive-quiet);
+  border-left-color: var(--positive);
+}
+
+.verdictBad {
+  background-color: var(--caution-quiet);
+  border-left-color: var(--caution);
+}
+
+/* Not an error and not a failure: nothing was concluded. Treated as neutral, because it is. */
+.verdictUnmarked {
+  background-color: var(--ground-sunken);
+  border-left-color: var(--rule-strong);
+}
+
+.verdictHeading {
+  font-family: var(--font-serif);
+  font-size: var(--text-lg);
+}
+
+/* Small, never hidden: how an answer was marked, and what it did, are part of the answer. */
+.attribution {
+  max-width: var(--measure-prose);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* Why the "Check my understanding" button is not here, in the place it would have been. */
+.pending {
+  align-self: center;
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}

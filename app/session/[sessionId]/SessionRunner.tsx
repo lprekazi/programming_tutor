@@ -3,11 +3,13 @@
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import type { PresentedActivity } from '@/domain/assessment/present'
 import { MAX_MESSAGE_LENGTH, type Turn } from '@/domain/tutoring/session'
 import { FAILURE_MARKER } from '@/tutor/session/stream-protocol'
 import { TutorProse } from '@/ui/components/TutorProse'
 
-import { cancelTutorTurn, finishSession, retryTutorTurn, sendMessage } from '../../actions'
+import { askCheck, cancelTutorTurn, finishSession, retryTutorTurn, sendMessage } from '../../actions'
+import { Check, type AnsweredView } from './Check'
 
 import styles from './page.module.css'
 
@@ -27,10 +29,19 @@ import styles from './page.module.css'
  *   - **still pending on load** — the page was reloaded mid-reply. Offer a retry.
  */
 
+/** A check, keyed to the turn it occupies so it can be placed in the sequence. */
+export interface CheckSlot {
+  readonly turnId: string
+  readonly presented: PresentedActivity
+  readonly hint: string | null
+  readonly answered: AnsweredView | null
+}
+
 interface Props {
   readonly sessionId: string
   readonly conceptTitle: string
   readonly turns: readonly Turn[]
+  readonly checks: readonly CheckSlot[]
 }
 
 type Phase =
@@ -42,7 +53,27 @@ type Phase =
 const TUTOR_LABEL = 'Tutor'
 const LEARNER_LABEL = 'You'
 
-export function SessionRunner({ sessionId, conceptTitle, turns }: Props) {
+/**
+ * Why the tutor is not asking a question right now, in words.
+ *
+ * Said rather than hidden. A control that silently does nothing is worse than one that explains
+ * itself, and each of these is a real reason the scheduler gave.
+ */
+const HOLD_WORDS: Readonly<Record<string, string>> = {
+  'too-early': 'Read a little more first — there is nothing yet to check.',
+  'enough-for-now': 'That is enough checking for one session. Ask about anything that is unclear instead.',
+  /*
+   * Reachable only after a check has been *answered*: an unanswered one is returned by
+   * `askCheck` before the selector is consulted, and the button that asks is not rendered while
+   * one is open. So the old wording — "finish the question already on the page first" —
+   * described a question that was never there when it was shown.
+   */
+  'just-asked': 'You have just answered one. Read on a little before the next.',
+  'nothing-to-learn':
+    'You are solid on this one, with enough behind it that another question would not tell either of us anything new.',
+}
+
+export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props) {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   /** Text arriving right now, for the turn named in `phase`. Never the whole conversation. */
@@ -64,6 +95,12 @@ export function SessionRunner({ sessionId, conceptTitle, turns }: Props) {
   /** A tutor turn nobody has streamed yet. Only `pending` — a stopped one stays stopped. */
   const awaitingStream =
     lastStored?.role === 'tutor' && lastStored.status === 'pending' ? lastStored : null
+
+  const checkFor = (turnId: string): CheckSlot | undefined =>
+    checks.find((slot) => slot.turnId === turnId)
+
+  /** A check that has been asked and not yet answered. The learner owes it an answer. */
+  const openCheck = checks.find((slot) => slot.answered === null)
 
   /**
    * The tutor turn the page is currently working on, finished or not.
@@ -197,6 +234,32 @@ export function SessionRunner({ sessionId, conceptTitle, turns }: Props) {
       })
   }, [draft, router, sessionId])
 
+  const [busy, setBusy] = useState(false)
+
+  const check = useCallback(() => {
+    setBusy(true)
+    setProblem(null)
+
+    askCheck(sessionId)
+      .then((result) => {
+        if (result.status === 'held') {
+          setProblem(HOLD_WORDS[result.because] ?? 'Not right now.')
+          return
+        }
+        if (result.status === 'unavailable') {
+          setProblem(result.message)
+          return
+        }
+        router.refresh()
+      })
+      .catch(() => {
+        setProblem('A question could not be prepared just now.')
+      })
+      .finally(() => {
+        setBusy(false)
+      })
+  }, [router, sessionId])
+
   const retry = useCallback(() => {
     setProblem(null)
     inputRef.current?.focus()
@@ -221,13 +284,26 @@ export function SessionRunner({ sessionId, conceptTitle, turns }: Props) {
       ? live.length === 0
         ? `The tutor is thinking about ${conceptTitle}…`
         : 'The tutor is replying.'
-      : phase.kind === 'cancelled'
-        ? 'You stopped the reply. You can ask again below.'
-        : phase.kind === 'failed'
-          ? phase.message
-          : problem
+      : /*
+         * `problem` first, because it is always the newer of the two: every action that sets it
+         * clears it on the way in, so if it is set it belongs to what the learner just did. It
+         * used to come last, and a reply that had failed earlier then masked the answer to the
+         * next thing they asked — pressing "Check my understanding" appeared to do nothing at
+         * all, because the reason it gave was never the message on screen.
+         */
+        (problem ??
+        (phase.kind === 'cancelled'
+          ? 'You stopped the reply. You can ask again below.'
+          : phase.kind === 'failed'
+            ? phase.message
+            : null))
   const visible = stored.filter(
-    (turn) => turn.text.trim().length > 0 || turn.id === currentTutorTurn?.id,
+    (turn) =>
+      turn.text.trim().length > 0 ||
+      turn.id === currentTutorTurn?.id ||
+      // An activity turn's own text is a record for the model, not something to render, so a
+      // check is kept in the sequence on the strength of the check existing.
+      checkFor(turn.id) !== undefined,
   )
   const remaining = MAX_MESSAGE_LENGTH - draft.length
 
@@ -239,6 +315,25 @@ export function SessionRunner({ sessionId, conceptTitle, turns }: Props) {
           // of the text that arrived, until a reload replaces it with the stored one.
           const isCurrent = turn.id === currentTutorTurn?.id
           const text = isCurrent && live.length > 0 ? live : turn.text
+
+          const slot = checkFor(turn.id)
+          if (slot !== undefined) {
+            return (
+              <li
+                className={styles.checkTurn}
+                data-role="activity"
+                data-testid={`turn-${String(turn.ordinal)}`}
+                data-turn-id={turn.id}
+                key={turn.id}
+              >
+                <Check
+                  activity={slot.presented}
+                  answered={slot.answered}
+                  hint={slot.hint}
+                />
+              </li>
+            )
+          }
 
           return (
             <li
@@ -299,6 +394,37 @@ export function SessionRunner({ sessionId, conceptTitle, turns }: Props) {
           <button className={styles.secondary} data-testid="retry-reply" onClick={retry} type="button">
             Try again
           </button>
+        )}
+        {!streaming && openCheck === undefined && (
+          /*
+           * The learner asks to be tested, rather than being tested at them. Whether a question
+           * is worth asking is still the scheduler's decision — pressing this can come back
+           * "not now", with the reason — but the moment is theirs to choose, which is the
+           * difference between a tutor checking understanding and an application administering
+           * a test.
+           */
+          <button
+            className={styles.secondary}
+            data-testid="ask-check"
+            disabled={busy}
+            onClick={check}
+            type="button"
+          >
+            Check my understanding
+          </button>
+        )}
+        {!streaming && openCheck !== undefined && (
+          /*
+           * Says why the button is not here.
+           *
+           * The conversation carries on over an unanswered question — deliberately, since
+           * nothing should trap a learner in a check they would rather skip — but the control
+           * that asks for another one simply disappeared, with nothing to say that the question
+           * further up was what removed it.
+           */
+          <p className={styles.pending} data-testid="check-pending">
+            There is a question above still waiting for an answer.
+          </p>
         )}
       </div>
 

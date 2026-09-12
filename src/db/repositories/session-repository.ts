@@ -35,6 +35,8 @@ export interface SessionRecord {
   readonly openedReason: string
   readonly startedAt: number
   readonly updatedAt: number
+  /** When this sitting began. Advances every time the session is reopened. */
+  readonly resumedAt: number
   readonly closedAt: number | null
   readonly turns: readonly Turn[]
 }
@@ -49,7 +51,7 @@ function readTurns(db: Db, sessionId: string): readonly Turn[] {
     .map((row) => ({
       id: row.id,
       ordinal: row.ordinal,
-      role: row.role === 'tutor' ? 'tutor' : 'learner',
+      role: row.role === 'tutor' ? 'tutor' : row.role === 'activity' ? 'activity' : 'learner',
       text: row.text,
       status: row.status as TurnStatus,
     }))
@@ -65,6 +67,7 @@ function hydrate(
     openedReason: row.openedReason,
     startedAt: row.startedAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
+    resumedAt: row.resumedAt.getTime(),
     closedAt: row.closedAt?.getTime() ?? null,
     turns: readTurns(db, row.id),
   }
@@ -91,6 +94,7 @@ export function openSession(
       openedReason: reason,
       startedAt: new Date(at),
       updatedAt: new Date(at),
+      resumedAt: new Date(at),
     })
     .onConflictDoNothing({ target: [tutoringSession.learnerId, tutoringSession.conceptId] })
     .run()
@@ -245,6 +249,49 @@ export type AppendResult =
    */
   | { readonly stored: false }
 
+/**
+ * Reserves the next position for a question.
+ *
+ * The same construction as `reserveTutorTurn` and for the same reason: the row exists before
+ * the question does, so the activity that attaches to it is unique per position and pressing
+ * the control twice cannot produce two questions.
+ */
+export function reserveActivityTurn(db: Db, sessionId: string, at: number): PendingTurn {
+  const turns = readTurns(db, sessionId)
+  const last = turns.at(-1)
+
+  if (last?.role === 'activity' && last.status !== 'complete') {
+    return { turnId: last.id, ordinal: last.ordinal }
+  }
+
+  const ordinal = nextOrdinal(turns)
+  const id = randomUUID()
+
+  db.insert(sessionTurn)
+    .values({
+      id,
+      sessionId,
+      ordinal,
+      role: 'activity',
+      text: '',
+      status: 'pending',
+      createdAt: new Date(at),
+      updatedAt: new Date(at),
+    })
+    .onConflictDoNothing({ target: [sessionTurn.sessionId, sessionTurn.ordinal] })
+    .run()
+
+  const [row] = db
+    .select()
+    .from(sessionTurn)
+    .where(and(eq(sessionTurn.sessionId, sessionId), eq(sessionTurn.ordinal, ordinal)))
+    .all()
+
+  if (row === undefined) throw new Error('The activity turn could not be reserved.')
+  touch(db, sessionId, at)
+  return { turnId: row.id, ordinal: row.ordinal }
+}
+
 /** Stores what the learner wrote. Their words are kept verbatim and never interpreted here. */
 export function appendLearnerTurn(
   db: Db,
@@ -354,7 +401,8 @@ export function closeSession(db: Db, sessionId: string, at: number): void {
 /** Reopens a closed session so the learner can carry on where they were. Idempotent. */
 export function reopenSession(db: Db, sessionId: string, at: number): void {
   db.update(tutoringSession)
-    .set({ closedAt: null, updatedAt: new Date(at) })
+    // A new sitting, so anything counted per sitting starts again from here.
+    .set({ closedAt: null, updatedAt: new Date(at), resumedAt: new Date(at) })
     .where(eq(tutoringSession.id, sessionId))
     .run()
 }

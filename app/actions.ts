@@ -12,7 +12,10 @@ import {
   submitAnswer,
 } from '@/db/repositories/diagnostic-repository'
 import {
+  readConceptState,
   readConceptStates,
+  readProfile,
+  readRecentMisconceptions,
   saveConfidence,
   saveExperience,
   saveGoal,
@@ -22,16 +25,44 @@ import {
 import {
   appendLearnerTurn,
   closeSession,
+  finishTutorTurn,
   openSession,
   readSession,
   readSessionByTurn,
   readSessionForConcept,
   recordCancellation,
   reopenSession,
+  reserveActivityTurn,
   reserveTutorTurn,
 } from '@/db/repositories/session-repository'
-import { isConceptId } from '@/domain/curriculum/graph'
-import { MAX_MESSAGE_LENGTH, unfinishedTutorTurn } from '@/domain/tutoring/session'
+import {
+  createActivity,
+  readActivity,
+  readSessionActivities,
+  readUsedItemIds,
+  recordHint,
+  submitAttempt,
+  type ActivityRecord,
+} from '@/db/repositories/activity-repository'
+import { DatabaseCallLog } from '@/db/repositories/call-log-repository'
+import {
+  composeFeedback,
+  markChoice,
+  markJudgement,
+  markPrediction,
+  type Marking,
+} from '@/domain/assessment/score'
+import { decideCheck, type CheckDecision, type HoldReason } from '@/domain/assessment/select'
+import { hintStrategy } from '@/tutor/strategies/coding'
+import { prepareAuthored, prepareGenerated, type PreparedActivity } from '@/tutor/session/checks'
+import { summariseCheck, tutoringContext } from '@/tutor/session/context'
+import { runLoggedStructured } from '@/tutor/session/tutor'
+import { isConceptId, isMisconceptionId } from '@/domain/curriculum/graph'
+import {
+  MAX_MESSAGE_LENGTH,
+  replyInProgress,
+  unfinishedTutorTurn,
+} from '@/domain/tutoring/session'
 import { describeSelection, selectNextConcept, stateLookupFrom } from '@/domain/scheduling/select'
 import { converseStrategy, explainStrategy } from '@/tutor/strategies/prose'
 import type { Area, ConceptId, MisconceptionId } from '@/domain/curriculum/types'
@@ -370,8 +401,13 @@ async function judgeExplanation(
 
   if (!outcome.ok) return null
 
+  // A judge that declines leaves the question unmarked, exactly as an unreachable one does.
+  // Before the verdict change this case did not exist: the model had to say true or false, and
+  // whichever it guessed became evidence.
+  if (outcome.value.verdict === 'cannot-tell') return null
+
   return {
-    correct: outcome.value.correct,
+    correct: outcome.value.verdict !== 'incorrect',
     misconceptions: outcome.value.misconceptions,
     explanation: outcome.value.explanation,
   }
@@ -626,4 +662,435 @@ export async function finishSession(sessionId: string): Promise<void> {
   closeSession(getDb(), sessionId, Date.now())
   revalidatePath('/home')
   redirect('/home')
+}
+
+
+// ---------------------------------------------------------------------------
+// Evaluated activities
+// ---------------------------------------------------------------------------
+
+export type CheckResult =
+  | { readonly status: 'asked'; readonly activityId: string }
+  /** The selector decided this is not the moment. The reason is shown. */
+  | { readonly status: 'held'; readonly because: HoldReason }
+  /** Nothing was asked, and this is the reason in words the learner can read. */
+  | { readonly status: 'unavailable'; readonly message: string }
+
+/**
+ * Asks the learner a question, if this is a moment for one.
+ *
+ * The decision is the domain's and is made from the learner model — band, evidence strength,
+ * recent misconceptions, what has already been asked. No model is consulted about whether to
+ * test somebody, because a model asked that is guessing at a learner state it cannot see.
+ *
+ * Idempotent through the turn: the tutor turn is reserved first, and the activity is unique on
+ * that turn, so pressing the control twice finds the question that already exists.
+ */
+export async function askCheck(sessionId: string): Promise<CheckResult> {
+  const db = getDb()
+  const now = Date.now()
+
+  const session = readSession(db, sessionId)
+  if (session === null) return { status: 'unavailable', message: 'That session no longer exists.' }
+
+  // A reply still arriving. Interrupting it with a question would leave two things waiting at
+  // once — but a reply that *failed* is not a reason to refuse, which is why this asks the
+  // narrow question rather than `unfinishedTutorTurn`.
+  if (replyInProgress(session.turns) !== null) {
+    return {
+      status: 'unavailable',
+      message: 'The tutor is still replying. Ask again once that has finished.',
+    }
+  }
+
+  const activities = readSessionActivities(db, sessionId)
+  const existing = activities.find((activity) => activity.attempt === null)
+  if (existing !== undefined) return { status: 'asked', activityId: existing.id }
+
+  const decision = decideCheck({
+    conceptId: session.conceptId,
+    state: readConceptState(db, session.conceptId),
+    recentMisconceptions: readRecentMisconceptions(db),
+    usedItemIds: readUsedItemIds(db),
+    // Concepts with real evidence behind them: the material a probe may reach into beyond what
+    // is being taught right now.
+    assessed: readConceptStates(db)
+      .filter((state) => state.evidenceCount > 0)
+      .map((state) => state.conceptId),
+    exchanges: session.turns.filter((turn) => turn.role === 'learner').length,
+    /*
+     * Checks in *this sitting*, not for all time.
+     *
+     * A session is unique per concept and is reopened rather than replaced, so its activities
+     * accumulate for the life of the profile. Counting all of them turned "that is enough
+     * checking for one session" into a permanent cap of four questions per concept: a learner
+     * coming back next week to reinforce something weak could never be checked on it again,
+     * and the sentence explaining the refusal was untrue.
+     */
+    checksSoFar: activities.filter((activity) => activity.createdAt >= session.resumedAt).length,
+    lastWasCheck: session.turns.at(-1)?.role === 'activity',
+  })
+
+  if (decision.kind === 'hold') return { status: 'held', because: decision.because }
+
+  const turn = reserveActivityTurn(db, sessionId, now)
+
+  const prepared =
+    decision.kind === 'ask'
+      ? prepareAuthored(decision, turn.turnId)
+      : await generateFor(
+          db,
+          session.conceptId,
+          decision,
+          turn.turnId,
+          activities.map((activity) => activity.prompt),
+        )
+
+  if (prepared === null) {
+    // Nothing showable. The reserved turn is closed off rather than left dangling, so the
+    // conversation does not stall on a question that never arrived.
+    finishTutorTurn(db, turn.turnId, 'failed', '', now)
+    return {
+      status: 'unavailable',
+      message:
+        'A question could not be prepared just now, so nothing has been asked. The explanation above still stands.',
+    }
+  }
+
+  const activity = createActivity(db, {
+    sessionId,
+    turnId: turn.turnId,
+    at: now,
+    ...prepared,
+  })
+
+  finishTutorTurn(db, turn.turnId, 'complete', prepared.prompt, now)
+  revalidatePath(`/session/${sessionId}`)
+  return { status: 'asked', activityId: activity.id }
+}
+
+async function generateFor(
+  db: ReturnType<typeof getDb>,
+  conceptId: ConceptId,
+  decision: Extract<CheckDecision, { kind: 'generate' }>,
+  seed: string,
+  alreadyAsked: readonly string[],
+): Promise<PreparedActivity | null> {
+  const resolved = resolveProvider()
+  if (resolved === null) return null
+
+  const profile = readProfile(db)
+
+  return await prepareGenerated({
+    provider: resolved.provider,
+    model: resolved.model,
+    conceptId,
+    learner: tutoringContext({
+      goal: profile?.goal ?? null,
+      conceptId,
+      states: readConceptStates(db),
+      recentMisconceptions: readRecentMisconceptions(db),
+    }),
+    avoid: alreadyAsked,
+    ground: decision.ground,
+    seed,
+    log: new DatabaseCallLog(db),
+    now: () => Date.now(),
+  })
+}
+
+export type AnswerOutcome =
+  | {
+      readonly status: 'marked'
+      readonly correct: boolean
+      readonly partial: boolean
+      readonly markedBy: 'deterministic' | 'model'
+      readonly feedback: string
+      /** True when this answer had already been recorded and nothing changed again. */
+      readonly alreadyAnswered: boolean
+    }
+  /** Kept, shown, and deliberately not turned into evidence. */
+  | { readonly status: 'unmarked'; readonly reason: string; readonly alreadyAnswered: boolean }
+  | { readonly status: 'rejected'; readonly message: string }
+
+/**
+ * Marks one answer and records it.
+ *
+ * Deterministic wherever it can be: a multiple choice against the shuffled order the learner
+ * actually saw, an output prediction against the expected string. Only a written answer is
+ * read by a model, and only because nothing else can read it.
+ *
+ * An answer that cannot be marked is stored as unmarked and produces no evidence. That is the
+ * honest outcome for a provider that is down, a judge that refuses, output that fails
+ * validation, or a judge that says it cannot tell — and it is better than a guess, because a
+ * guess becomes part of what this application believes about a person.
+ */
+export async function submitActivityAnswer(
+  activityId: string,
+  response: string,
+): Promise<AnswerOutcome> {
+  const db = getDb()
+  const now = Date.now()
+
+  const activity = readActivity(db, activityId)
+  if (activity === null) return { status: 'rejected', message: 'That question no longer exists.' }
+
+  if (response.trim().length === 0) {
+    return { status: 'rejected', message: 'Write an answer first.' }
+  }
+  if (response.length > MAX_MESSAGE_LENGTH) {
+    return { status: 'rejected', message: 'That is longer than this question needs.' }
+  }
+
+  // Checked before anything expensive. A repeat changes nothing, so there is no reason to pay
+  // for a model call to re-judge an answer that is already recorded.
+  if (activity.attempt !== null) {
+    return replayOf(activity.attempt)
+  }
+
+  const marking = await markAnswer(db, activity, response)
+  const judgeWords = marking.judgeExplanation
+
+  const feedback = composeFeedback({
+    marking: marking.marking,
+    explanation: activity.explanation,
+    judgeExplanation: judgeWords,
+  })
+
+  const result = submitAttempt(db, {
+    activityId,
+    response,
+    marking: marking.marking,
+    feedback,
+    hintDepth: activity.hints.length,
+    at: now,
+  })
+
+  // The activity turn's text becomes a compact record of the exchange, so the tutor's next
+  // reply knows what was asked and how it went. Never rendered; see `summariseCheck`.
+  finishTutorTurn(
+    db,
+    activity.turnId,
+    'complete',
+    summariseCheck({
+      prompt: activity.prompt,
+      marked: result.attempt.marked,
+      correct: result.attempt.correct === true,
+      partial: result.attempt.partial,
+      misconceptions: result.attempt.misconceptions,
+    }),
+    now,
+  )
+
+  revalidatePath(`/session/${activity.sessionId}`)
+  revalidatePath('/home')
+
+  if (!result.attempt.marked) {
+    return {
+      status: 'unmarked',
+      reason: result.attempt.unmarkedReason ?? 'That answer could not be marked.',
+      alreadyAnswered: !result.recorded,
+    }
+  }
+
+  return {
+    status: 'marked',
+    correct: result.attempt.correct === true,
+    partial: result.attempt.partial,
+    markedBy: result.attempt.markingSource ?? 'deterministic',
+    feedback: result.attempt.feedback,
+    alreadyAnswered: !result.recorded,
+  }
+}
+
+function replayOf(attempt: NonNullable<ActivityRecord['attempt']>): AnswerOutcome {
+  if (!attempt.marked) {
+    return {
+      status: 'unmarked',
+      reason: attempt.unmarkedReason ?? 'That answer could not be marked.',
+      alreadyAnswered: true,
+    }
+  }
+
+  return {
+    status: 'marked',
+    correct: attempt.correct === true,
+    partial: attempt.partial,
+    markedBy: attempt.markingSource ?? 'deterministic',
+    feedback: attempt.feedback,
+    alreadyAnswered: true,
+  }
+}
+
+/**
+ * Decides what the answer was worth, deterministically where possible.
+ *
+ * The model is reached for exactly one kind of question, and what comes back is a verdict it
+ * is allowed to decline. `markJudgement` in the domain turns that verdict into a marking, which
+ * is where "cannot tell" becomes no evidence rather than a coin flip.
+ */
+async function markAnswer(
+  db: ReturnType<typeof getDb>,
+  activity: ActivityRecord,
+  response: string,
+): Promise<{ marking: Marking; judgeExplanation: string | undefined }> {
+  if (activity.kind === 'choice') {
+    return {
+      marking: markChoice(response, {
+        correctIndex: activity.correctIndex ?? -1,
+        optionMisconceptions: (activity.optionMisconceptions ?? []).map((id) =>
+          isMisconceptionId(id ?? '') ? (id as MisconceptionId) : null,
+        ),
+      }),
+      judgeExplanation: undefined,
+    }
+  }
+
+  if (activity.kind === 'predict-output') {
+    return {
+      marking: markPrediction(response, {
+        expectedOutput: activity.expectedOutput ?? '',
+        knownWrongAnswers: (activity.knownWrongAnswers ?? []).flatMap((wrong) =>
+          isMisconceptionId(wrong.misconception)
+            ? [{ answer: wrong.answer, misconception: wrong.misconception }]
+            : [],
+        ),
+      }),
+      judgeExplanation: undefined,
+    }
+  }
+
+  const resolved = resolveProvider()
+  if (resolved === null) {
+    return {
+      marking: {
+        kind: 'unmarked',
+        reason:
+          'No tutor is configured, so this answer has not been marked. Nothing has been recorded for it.',
+      },
+      judgeExplanation: undefined,
+    }
+  }
+
+  const profile = readProfile(db)
+  const outcome = await runLoggedStructured(
+    resolved.provider,
+    answerEvaluateStrategy,
+    {
+      learner: tutoringContext({
+        goal: profile?.goal ?? null,
+        conceptId: activity.conceptId,
+        states: readConceptStates(db),
+        recentMisconceptions: readRecentMisconceptions(db),
+      }),
+      conceptId: activity.conceptId,
+      question: activity.prompt,
+      expected: activity.expectedPoints,
+      learnerAnswer: response,
+    },
+    { model: resolved.model, log: new DatabaseCallLog(db), now: () => Date.now() },
+  )
+
+  if (!outcome.ok) {
+    // Refused, unreachable, or output that never satisfied the contract. None of those is a
+    // judgement about the learner, so none of them becomes one.
+    return {
+      marking: {
+        kind: 'unmarked',
+        reason:
+          'The tutor could not read that answer just now, so nothing has been recorded for it. Your answer is saved.',
+      },
+      judgeExplanation: undefined,
+    }
+  }
+
+  return {
+    marking: markJudgement({
+      verdict: outcome.value.verdict,
+      misconceptions: outcome.value.misconceptions,
+    }),
+    judgeExplanation: outcome.value.explanation,
+  }
+}
+
+export type HintResult =
+  | { readonly status: 'given'; readonly text: string }
+  | { readonly status: 'unavailable'; readonly message: string }
+
+/**
+ * The single hint M5 offers.
+ *
+ * One step, not a ladder — that is M6. Taking it attenuates the positive evidence a correct
+ * answer produces and can never turn it negative (ADR-0005): asking for help is information
+ * about how a success was reached, not a penalty for needing it.
+ *
+ * Idempotent: asking twice returns the same words rather than generating new ones, so the
+ * recorded depth counts steps taken rather than buttons pressed.
+ */
+export async function askHint(activityId: string): Promise<HintResult> {
+  const db = getDb()
+  const now = Date.now()
+
+  const activity = readActivity(db, activityId)
+  if (activity === null) return { status: 'unavailable', message: 'That question no longer exists.' }
+  if (activity.attempt !== null) {
+    return { status: 'unavailable', message: 'That question has already been answered.' }
+  }
+
+  const already = activity.hints.find((hint) => hint.depth === 1)
+  if (already !== undefined) return { status: 'given', text: already.text }
+
+  const resolved = resolveProvider()
+  if (resolved === null) {
+    return {
+      status: 'unavailable',
+      message: 'No tutor is configured, so there is no hint to give.',
+    }
+  }
+
+  const profile = readProfile(db)
+  const outcome = await runLoggedStructured(
+    resolved.provider,
+    hintStrategy,
+    {
+      learner: tutoringContext({
+        goal: profile?.goal ?? null,
+        conceptId: activity.conceptId,
+        states: readConceptStates(db),
+        recentMisconceptions: readRecentMisconceptions(db),
+      }),
+      conceptId: activity.conceptId,
+      brief: activity.prompt,
+      learnerAttempt: null,
+      depth: 1,
+      previousHints: [],
+    },
+    { model: resolved.model, log: new DatabaseCallLog(db), now: () => Date.now() },
+  )
+
+  if (!outcome.ok) {
+    return { status: 'unavailable', message: 'A hint could not be prepared just now.' }
+  }
+
+  const stored = recordHint(db, {
+    activityId,
+    depth: 1,
+    text: outcome.value.text,
+    strategyId: hintStrategy.id,
+    strategyVersion: hintStrategy.version,
+    model: resolved.model,
+    at: now,
+  })
+
+  if (!stored) {
+    // Answered while the hint was being written. Showing it now would be showing help for a
+    // question that is already marked, and the mark was made without it.
+    return {
+      status: 'unavailable',
+      message: 'That question has already been answered, so there is nothing left to nudge.',
+    }
+  }
+
+  revalidatePath(`/session/${activity.sessionId}`)
+  return { status: 'given', text: outcome.value.text }
 }

@@ -155,6 +155,11 @@
 }
 
 .conceptTitle {
+  /*
+   * Indented whether or not this row opens, so the column stays straight down the list and
+   * the marker below has somewhere to sit.
+   */
+  padding-left: var(--space-4);
   font-size: var(--text-sm);
 }
 
@@ -206,4 +211,109 @@
   padding-top: var(--space-5);
   border-top: 1px solid var(--rule);
   font-size: var(--text-sm);
+}
+
+/* ---- why a band says what it says ----------------------------------------- */
+
+/*
+ * The evidence behind a concept, on request.
+ *
+ * Closed by default: thirty-three concepts each showing their history would be a wall. Open,
+ * it answers the only question a coarse band invites — "why does it say that?" — with the
+ * reason the domain recorded at the time rather than a sentence composed here to sound
+ * plausible.
+ */
+.conceptWithHistory + .conceptWithHistory,
+.conceptWithHistory + .concept,
+.concept + .conceptWithHistory {
+  border-top: 1px solid var(--rule);
+}
+
+/*
+ * The native marker is suppressed because it would sit outside the row's grid and pull the
+ * title column out of line. It is replaced rather than removed: a row that opens has to say so
+ * to someone who is not hovering it — on a touch screen nobody is — and a hover underline
+ * alone left the whole feature undiscoverable.
+ *
+ * The same idiom as "Why this?" further up the page, so the two read as one mechanism.
+ */
+.history summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.history summary::-webkit-details-marker {
+  display: none;
+}
+
+.history summary .conceptTitle {
+  position: relative;
+}
+
+.history summary .conceptTitle::before {
+  position: absolute;
+  left: 0;
+  color: var(--ink-faint);
+  content: '\25b8';
+  transition: transform 120ms ease;
+}
+
+.history[open] summary .conceptTitle::before {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history summary .conceptTitle::before {
+    transition: none;
+  }
+}
+
+.history summary:hover .conceptTitle,
+.history summary:focus-visible .conceptTitle {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.evidence {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 var(--space-4);
+  margin-left: var(--space-4);
+  border-left: 1px solid var(--rule);
+  list-style: none;
+}
+
+.evidenceEntry {
+  display: grid;
+  grid-template-columns: 4rem 1fr;
+  gap: var(--space-3);
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.evidenceWhen {
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.evidenceWhat {
+  color: var(--ink-muted);
+}
+
+.evidenceMore {
+  padding-left: var(--space-8);
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 38rem) {
+  .evidenceEntry {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+
+  .evidenceMore {
+    padding-left: var(--space-4);
+  }
 }

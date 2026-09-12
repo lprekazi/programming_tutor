@@ -82,10 +82,17 @@ function normaliseOption(option: string): string {
   return option.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+/** The same comparison, applied to whole questions. */
+function normaliseQuestion(question: string): string {
+  return question.trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
 export const quizGenerateStrategy: StructuredStrategy<QuizGenerateInput, Quiz> = {
   kind: 'structured',
   id: 'quiz.generate',
-  version: '1',
+  // Bumped in M5 for the repeated-question invariant, so a log entry can be traced to the
+  // contract that produced it.
+  version: '2',
   purpose: 'Write one multiple-choice question whose distractors map to known misconceptions.',
   streams: false,
   schemaName: 'quiz',
@@ -103,8 +110,26 @@ export const quizGenerateStrategy: StructuredStrategy<QuizGenerateInput, Quiz> =
       task: `WRITE A QUESTION ON: ${concept.id} — ${concept.title}\n${concept.summary}${avoid}`,
     })
   },
-  checkInvariants(output, _input, context) {
+  checkInvariants(output, input, context) {
     const problems: InvariantProblem[] = []
+
+    /*
+     * A question the learner has already been asked.
+     *
+     * The prompt lists what to avoid, and a model may still return one of them — the mock
+     * provider does, every time, because a fixture has no opinion about what came before. It is
+     * checked rather than trusted because a repeat is not merely tedious: answering the same
+     * question twice deposits a second piece of evidence about the same moment of
+     * understanding, and the authored path prevents that by construction (`usedItemIds`) while
+     * the generated path had nothing standing in the way.
+     */
+    if (input.avoid.some((asked) => normaliseQuestion(asked) === normaliseQuestion(output.question))) {
+      problems.push({
+        code: 'repeats-a-question-already-asked',
+        detail:
+          'This learner has already been asked this question. Write a different one on the same concept.',
+      })
+    }
 
     const normalised = output.options.map(normaliseOption)
     const unique = new Set(normalised)
@@ -145,9 +170,47 @@ export const quizGenerateStrategy: StructuredStrategy<QuizGenerateInput, Quiz> =
  * There is no field here for mastery, confidence in the learner, or what they should do next.
  * The model reports what it saw; the domain decides what it means.
  */
+/**
+ * The verdict, as four named outcomes rather than a boolean.
+ *
+ * M2 recorded a limitation here: `correct: boolean` was the real trust boundary, the one field
+ * where a model's opinion became evidence about a person. M5 is the milestone that consumes it
+ * in earnest, so it is the milestone to improve it in.
+ *
+ * The problem with a boolean is not that it is coarse. It is that it leaves a judge with no
+ * opinion no way to say so. Asked "correct: true or false?" about an answer that is genuinely
+ * unreadable — off topic, one word, contradicting itself — the model must pick one, and
+ * whichever it picks becomes a numeric change in a learner's record. `cannot-tell` is the fix:
+ * it is an honest answer to an unanswerable question, and the domain turns it into no evidence
+ * at all rather than a coin flip.
+ *
+ * `partially-correct` earns its place separately. Plenty of short answers reach the right
+ * conclusion with a piece of the reasoning missing, and a boolean forces that into either a
+ * clean success or a failure. Neither is true. The domain treats it as a success, attenuated
+ * the way a hinted success is attenuated (ADR-0005) — so it never lowers a band, and it counts
+ * for less than a complete answer.
+ *
+ * What has *not* changed is who decides what the verdict means. The model reports one of four
+ * words. `markJudgement` in the domain decides which of them is evidence and how much. There is
+ * still no field here through which a number could be supplied.
+ */
 export const answerEvaluationSchema = z
   .object({
-    correct: z.boolean(),
+    verdict: z.enum([
+      /** Right, with reasoning that supports it. */
+      'correct',
+      /** Right, but with part of the reasoning missing or unstated. */
+      'partially-correct',
+      /** Wrong. */
+      'incorrect',
+      /**
+       * Not enough in the answer to judge either way.
+       *
+       * The honest choice for an answer that is off topic, empty of content, or
+       * self-contradictory. It produces no evidence, so it costs the learner nothing.
+       */
+      'cannot-tell',
+    ]),
     /**
      * Why, in terms of what their answer actually says or does. Shown to the learner, so it
      * addresses them directly.
@@ -177,9 +240,22 @@ export interface AnswerEvaluateInput {
 
 const ANSWER_EVALUATE_INSTRUCTION = `TASK: judge one answer.
 
-Decide whether it is correct. Be strict about substance and forgiving about form — spelling,
-spacing and phrasing do not matter; meaning does. An answer that is right for the wrong reason
-is not correct.
+Choose one verdict:
+
+- correct — right, and the reasoning shown supports it
+- partially-correct — reaches the right conclusion with part of the reasoning missing or
+  unstated. Not a half-mark: use it when they plainly have the idea but have not said all of it
+- incorrect — wrong
+- cannot-tell — there is not enough in the answer to judge. Use this for an answer that is off
+  topic, says nothing substantive, or contradicts itself
+
+cannot-tell is a real option and you should use it when it applies. An answer nobody could
+grade produces no record either way, which is the right outcome — far better than a guess that
+becomes part of what this application believes about a person. Do not reach for a verdict you
+cannot support.
+
+Be strict about substance and forgiving about form: spelling, spacing and phrasing do not
+matter; meaning does. An answer that is right for the wrong reason is not correct.
 
 Explain your decision in terms of what their answer actually says. If it is wrong, say what
 would happen if they acted on it, or what the code would really do. Never only "that is not
@@ -193,8 +269,11 @@ Address the learner as "you". Two or three sentences.`
 export const answerEvaluateStrategy: StructuredStrategy<AnswerEvaluateInput, AnswerEvaluation> = {
   kind: 'structured',
   id: 'answer.evaluate',
-  version: '1',
-  purpose: 'Judge a single learner answer and say why, without judging the learner.',
+  // Bumped for the verdict change. The version rides on every call log, so a change in how
+  // answers were judged can be traced to the prompt and schema that judged them.
+  version: '2',
+  purpose:
+    'Judge a single learner answer and say why, with the option of declining. Never decides what the judgement does to learner state.',
   streams: false,
   schemaName: 'answer_evaluation',
   schema: answerEvaluationSchema,
@@ -217,11 +296,30 @@ export const answerEvaluateStrategy: StructuredStrategy<AnswerEvaluateInput, Ans
 
     // A correct answer that also demonstrates a wrong idea is contradictory as recorded
     // evidence: the same attempt would count both for and against the same concept.
-    if (output.correct && output.misconceptions.length > 0) {
+    if (output.verdict === 'correct' && output.misconceptions.length > 0) {
       problems.push({
         code: 'misconception-on-correct-answer',
         detail:
-          'The answer is marked correct but also tagged with misconceptions. Either it is wrong, or there are no misconceptions to tag.',
+          'The verdict is "correct" but the answer is also tagged with misconceptions. Either it is not correct, or there are no misconceptions to tag.',
+      })
+    }
+
+    // An answer nobody could read cannot also have shown a specific wrong idea. Allowing both
+    // would let an unmarked attempt still deposit a diagnosis.
+    if (output.verdict === 'cannot-tell' && output.misconceptions.length > 0) {
+      problems.push({
+        code: 'misconception-on-unjudgeable-answer',
+        detail:
+          'The verdict is "cannot-tell", so there is not enough in the answer to identify a misconception in it either. Report no misconceptions, or choose a verdict you can support.',
+      })
+    }
+
+    // `nearMiss` says they had the idea and slipped. That is a statement about a wrong answer.
+    if (output.nearMiss && output.verdict !== 'incorrect' && output.verdict !== 'partially-correct') {
+      problems.push({
+        code: 'near-miss-on-non-wrong-answer',
+        detail:
+          'nearMiss describes a wrong answer that was close. It cannot be true for a verdict of "correct" or "cannot-tell".',
       })
     }
 

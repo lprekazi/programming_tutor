@@ -51,7 +51,13 @@ export function deriveEvidence(state: ConceptState, attempt: JudgedAttempt): Der
   const priorBand = bandOf(state)
   const update = applyOutcome(state, {
     correct: attempt.correct,
-    hintDepth: attempt.hintDepth,
+    /*
+     * One step of attenuation for an answer that was right with something unsaid, on top of
+     * whatever help was taken. The learner model has one dial for "reached it with less than
+     * full demonstration", and this is it — but the *record* keeps the two apart, because the
+     * record is read by a person who knows whether they took a hint.
+     */
+    hintDepth: attempt.hintDepth + (attempt.partial === true ? 1 : 0),
     itemDifficulty: attempt.itemDifficulty,
   })
 
@@ -106,19 +112,22 @@ function describeChange(
 ): string {
   const title = getConcept(attempt.conceptId).title.toLowerCase()
 
+  const partial = attempt.partial === true
+  const help =
+    attempt.hintDepth === 0 ? '' : ` after ${describeHints(attempt.hintDepth)}`
+  const missing = partial ? ', with part of the reasoning left unsaid' : ''
+
   const what = attempt.correct
-    ? attempt.hintDepth === 0
+    ? attempt.hintDepth === 0 && !partial
       ? `Answered a question on ${title} correctly, unaided`
-      : `Answered a question on ${title} correctly after ${describeHints(attempt.hintDepth)}`
-    : attempt.hintDepth === 0
-      ? `Did not answer a question on ${title} correctly`
-      : `Did not answer a question on ${title} correctly, after ${describeHints(attempt.hintDepth)}`
+      : `Answered a question on ${title} correctly${help}${missing}`
+    : `Did not answer a question on ${title} correctly${help}`
 
   if (priorBand !== posteriorBand) {
     return `${what}. This moved ${title} from ${readableBand(priorBand)} to ${readableBand(posteriorBand)}.`
   }
-  if (attempt.correct && attempt.hintDepth > 0) {
-    return `${what}. Counted as progress, though less than an unaided answer, and scheduled to come back sooner.`
+  if (attempt.correct && (attempt.hintDepth > 0 || partial)) {
+    return `${what}. Counted as progress, though less than a complete unaided answer, and scheduled to come back sooner.`
   }
   return `${what}.`
 }

@@ -177,11 +177,74 @@ describe('misconception catalogue', () => {
     }
   })
 
+  /*
+   * Both fields are quoted straight into feedback a learner reads (`composeFeedback`), so they
+   * have to be written *to* them rather than *about* them. One entry described "a learner
+   * holding this belief", and the feedback it produced switched from second to third person
+   * halfway through a paragraph addressed to the person reading it.
+   */
+  it('is written to the learner, never about them', () => {
+    for (const misconception of MISCONCEPTIONS) {
+      expect(misconception.belief, `${misconception.id}.belief`).not.toMatch(
+        /learner|student|novice/i,
+      )
+      expect(misconception.reality, `${misconception.id}.reality`).not.toMatch(
+        /learner|student|novice/i,
+      )
+    }
+  })
+
   it('states both the wrong belief and what is actually true', () => {
     // Feedback is generated from these, so an entry missing either half is unusable.
     for (const misconception of MISCONCEPTIONS) {
       expect(misconception.belief.length, misconception.id).toBeGreaterThan(10)
       expect(misconception.reality.length, misconception.id).toBeGreaterThan(10)
+    }
+  })
+
+  /*
+   * The gap M1 recorded as a limitation and M5 closed. M5 is the first milestone that actually
+   * consumes misconception identifiers, so a concept with none is a concept the tutor cannot
+   * say anything diagnostic about. Asserted rather than noted, so it cannot quietly reopen when
+   * a concept is added.
+   */
+  it('covers every concept in the curriculum', () => {
+    const covered = new Set(MISCONCEPTIONS.flatMap((misconception) => misconception.relatedConcepts))
+    const uncovered = CONCEPTS.filter((concept) => !covered.has(concept.id)).map((c) => c.id)
+
+    expect(uncovered, `no misconception mentions: ${uncovered.join(', ')}`).toEqual([])
+  })
+
+  it('covers every competence area, including object-oriented', () => {
+    const areas = new Set(
+      MISCONCEPTIONS.flatMap((misconception) =>
+        misconception.relatedConcepts.map((id) => getConcept(id).area),
+      ),
+    )
+
+    for (const concept of CONCEPTS) {
+      expect(areas.has(concept.area), concept.area).toBe(true)
+    }
+  })
+
+  it('gives a unique identifier and title to every entry', () => {
+    const ids = MISCONCEPTIONS.map((misconception) => misconception.id)
+    const titles = MISCONCEPTIONS.map((misconception) => misconception.title)
+
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(new Set(titles).size).toBe(titles.length)
+  })
+
+  /*
+   * Provenance is a claim about where wording came from, and a wrong one is worse than none.
+   * Entries taken from the inventory must name an identifier that looks like the inventory's
+   * own convention; everything else must say `unattributed` out loud.
+   */
+  it('names an inventory identifier that matches its own URL', () => {
+    for (const misconception of MISCONCEPTIONS) {
+      if (misconception.source.kind !== 'progmiscon') continue
+      expect(misconception.source.url, misconception.id).toContain(misconception.source.id)
+      expect(misconception.source.id, misconception.id).toMatch(/^[A-Z][A-Za-z]+$/)
     }
   })
 
