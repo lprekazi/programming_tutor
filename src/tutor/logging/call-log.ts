@@ -40,7 +40,15 @@ export interface LlmCallLog {
   /** Wall-clock milliseconds for the whole operation, including any repair attempt. */
   readonly latencyMs: number
 
-  readonly outcome: 'ok' | 'ok-after-repair' | 'fallback' | 'failed'
+  /**
+   * `cancelled` is its own outcome, not a failure.
+   *
+   * A learner pressing Stop was being recorded as `failed`, distinguishable from a real outage
+   * only by `failureReason` happening to be null. Any reliability figure computed from this
+   * table would have counted ordinary use of the Stop button against the system — and this
+   * table is the only source of real numbers about how it behaved.
+   */
+  readonly outcome: 'ok' | 'ok-after-repair' | 'fallback' | 'failed' | 'cancelled'
   readonly repairAttempted: boolean
   readonly repairSucceeded: boolean
   /** Codes of every validation problem seen, in order. Codes only — details can quote learner text. */
@@ -89,6 +97,8 @@ export interface BuildLogInput {
   readonly streamed: boolean
   readonly ok: boolean
   readonly usedFallback: boolean
+  /** The learner stopped it. Neither a success nor a failure. */
+  readonly cancelled?: boolean | undefined
   readonly repairAttempted: boolean
   readonly repairSucceeded: boolean
   readonly failureReason: StrategyFailureReason | null
@@ -104,13 +114,16 @@ export interface BuildLogInput {
  * at a call site.
  */
 export function buildCallLog(input: BuildLogInput): LlmCallLog {
-  const outcome: LlmCallLog['outcome'] = input.usedFallback
-    ? 'fallback'
-    : !input.ok
-      ? 'failed'
-      : input.repairSucceeded
-        ? 'ok-after-repair'
-        : 'ok'
+  const outcome: LlmCallLog['outcome'] =
+    input.cancelled === true
+      ? 'cancelled'
+      : input.usedFallback
+        ? 'fallback'
+        : !input.ok
+          ? 'failed'
+          : input.repairSucceeded
+            ? 'ok-after-repair'
+            : 'ok'
 
   return {
     at: input.at,

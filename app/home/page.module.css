@@ -60,15 +60,65 @@
   font-size: var(--text-xl);
 }
 
-/*
- * Stated plainly rather than dressed up as a disabled button. A control that looks like it
- * should work and does not is worse than a sentence saying the part is not built.
- */
-.pending {
-  max-width: var(--measure-prose);
-  margin-top: var(--space-4);
-  color: var(--ink-faint);
+/* ---- the one thing to do next --------------------------------------------- */
+
+.nextStep {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-3);
+}
+
+.primary {
+  margin-top: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  background-color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  color: var(--surface);
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.primary:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.problem {
+  color: var(--negative);
+  font-size: var(--text-sm);
+}
+
+/*
+ * Closed by default, and styled as a line of text rather than a control. The reasoning is
+ * available to anyone who wants it and in the way of nobody who does not.
+ */
+.why {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.why summary {
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.why summary:hover {
+  color: var(--ink);
+}
+
+.grounds {
+  display: grid;
+  gap: var(--space-2);
+  max-width: var(--measure-prose);
+  padding-left: var(--space-5);
+  margin-top: var(--space-3);
+  color: var(--ink-muted);
   line-height: var(--leading-relaxed);
 }
 

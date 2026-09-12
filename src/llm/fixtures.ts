@@ -1,4 +1,5 @@
-import { MockProvider, type MockResponse } from './mock-provider'
+import { MockProvider, renderPrompt, type MockResponse } from './mock-provider'
+import type { TextChunk, TutorProvider } from './provider'
 
 /**
  * Behavioural scenarios for the mock provider.
@@ -245,11 +246,154 @@ export function repairFails(strategy: string, invalid: MockResponse): MockProvid
   return new MockProvider().on(strategy, invalid).on(strategy, invalid).on(strategy, invalid)
 }
 
+/**
+ * An opening teaching turn, as a stream.
+ *
+ * Written to exercise the renderer as well as the transport: it has a paragraph, a fenced code
+ * block and a question, and the fence is split across chunks so the parser is seen handling an
+ * unclosed one mid-flight, which is what it will do constantly in real use.
+ */
+export const OPENING_STREAM: MockResponse = {
+  kind: 'text',
+  chunks: [
+    'Here is a loop that adds up three numbers.\n\n',
+    '```python\ntotal = 0\n',
+    'for n in [2, 3, 4]:\n    total = total + n\n',
+    'print(total)\n```\n\n',
+    'The name `total` survives from one pass to the next, which is what lets it build up. ',
+    'What do you think it prints?',
+  ],
+}
+
+/** A reply to something the learner asked. Deliberately short, and not a wall of text. */
+export const REPLY_STREAM: MockResponse = {
+  kind: 'text',
+  chunks: [
+    'Good question. ',
+    'The variable is created before the loop starts, so it is still there on the second pass. ',
+    'If you moved `total = 0` inside the loop, what would change?',
+  ],
+}
+
+/**
+ * What the sidecar reports after an ordinary exchange: concepts touched, nothing claimed.
+ *
+ * The concept is read out of the prompt rather than fixed, because an observation has to name
+ * the concept the session is about or it is refused — and which concept that is depends on what
+ * the scheduler picked for the learner in front of it. A fixed value was correct for exactly
+ * one situation and quietly failed validation everywhere else, which made the accepted path
+ * untestable end to end without anybody noticing.
+ */
+export const SESSION_OBSERVATION: MockResponse = {
+  kind: 'derive',
+  from: (prompt) => ({
+    conceptsDiscussed: [conceptFromPrompt(prompt)],
+    misconceptions: [],
+    note: 'The learner asked how this works, and the tutor answered.',
+  }),
+}
+
+/** Reads the `SESSION CONCEPT: <id> — <title>` line the strategy puts in its task block. */
+function conceptFromPrompt(prompt: string): string {
+  return /SESSION CONCEPT: ([a-z-]+)/.exec(prompt)?.[1] ?? 'program-execution'
+}
+
+/** An observation about some other conversation. Must be refused rather than stored. */
+export const SESSION_OBSERVATION_WRONG_CONCEPT: MockResponse = {
+  kind: 'value',
+  value: {
+    conceptsDiscussed: ['list-mutation-and-aliasing'],
+    misconceptions: [],
+    note: 'Not about the concept this session is for.',
+  },
+}
+
+/**
+ * A sidecar that claims the learner has mastered something.
+ *
+ * The schema is `.strict()` and has no such field, so this is rejected outright rather than
+ * having the extra key quietly dropped. Exists to prove that.
+ */
+export const SESSION_OBSERVATION_CLAIMS_MASTERY: MockResponse = {
+  kind: 'value',
+  value: {
+    conceptsDiscussed: ['program-execution'],
+    misconceptions: [],
+    note: 'They have got it.',
+    mastery: 0.9,
+    band: 'secure',
+  },
+}
+
+/**
+ * The same tutor, delivering its chunks at a fixed pace.
+ *
+ * Exists so that cancelling a stream can be exercised at all: the plain mock resolves on a
+ * microtask, which leaves no window in which a learner could press Stop. The pace is on the
+ * *server* side, which is where a real stream's pace comes from — the test still waits on the
+ * page publishing "the tutor is replying" rather than on a clock of its own.
+ */
+export function pacedTutor(msPerChunk: number): TutorProvider {
+  const inner = workingTutor()
+
+  return {
+    structured: (request) => inner.structured(request),
+    streamText: (request, signal) => {
+      const stream = inner.streamText(request, signal)
+      return (async function* paced(): AsyncIterable<TextChunk> {
+        for await (const chunk of stream) {
+          await new Promise((resolve) => setTimeout(resolve, msPerChunk))
+          if (signal?.aborted === true) return
+          yield chunk
+        }
+      })()
+    },
+  }
+}
+
+/**
+ * A tutor whose first attempt at any given turn drops, and whose second works.
+ *
+ * The shape of a transient failure, which is the case the retry control exists for. Counted
+ * rather than timed, so it is deterministic.
+ *
+ * Keyed on the **prompt**, not the strategy. Keying on the strategy made the behaviour depend
+ * on how many turns had been taken earlier in the process, so one end-to-end test could leave
+ * the counter somewhere that made the next test see a success where it expected a failure.
+ * A prompt identifies a turn, which is the thing that should fail once and then work.
+ */
+export function flakyTutor(): TutorProvider {
+  const inner = workingTutor()
+  // Bounded for the same reason the mock's call list is: this provider outlives a request now,
+  // and the keys are whole prompts. Forty is far more than any test needs.
+  const seen = new Set<string>()
+  const MAX_KEYS = 40
+
+  return {
+    structured: (request) => inner.structured(request),
+    streamText: (request, signal) => {
+      const key = renderPrompt(request.blocks)
+
+      if (!seen.has(key)) {
+        if (seen.size >= MAX_KEYS) seen.clear()
+        seen.add(key)
+        return (async function* drops(): AsyncIterable<TextChunk> {
+          await Promise.resolve()
+          yield { delta: 'Let me show you ' }
+          throw new Error('the connection dropped')
+        })()
+      }
+      return inner.streamText(request, signal)
+    },
+  }
+}
+
 /** A provider wired for an ordinary, successful tutoring exchange. */
 export function workingTutor(): MockProvider {
   return new MockProvider()
-    .on('converse', EXPLANATION_STREAM)
-    .on('explain', EXPLANATION_STREAM)
+    .on('converse', REPLY_STREAM)
+    .on('explain', OPENING_STREAM)
+    .on('session.observe', SESSION_OBSERVATION)
     .on('quiz.generate', QUIZ_ON_RANGE)
     .on('answer.evaluate', ANSWER_CORRECT)
     .on('diagnose', DIAGNOSIS)

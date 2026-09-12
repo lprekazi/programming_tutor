@@ -15,6 +15,13 @@
       "when": 1789108910468,
       "tag": "0001_onboarding_and_diagnostic",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789134591571,
+      "tag": "0002_tutoring_sessions",
+      "breakpoints": true
     }
   ]
 }

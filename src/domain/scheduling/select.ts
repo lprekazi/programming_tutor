@@ -93,8 +93,9 @@ export function availableConcepts(lookup: StateLookup): readonly Concept[] {
 export function selectNextConcept(lookup: StateLookup, now: number): Selection | null {
   const available = availableConcepts(lookup)
 
-  // Dueness is decided by `isReviewDue`, the same predicate the interface uses, so a
-  // concept shown as "due now" can never be silently skipped here.
+  // Dueness is decided by `isReviewDue` rather than by comparing timestamps here, so the
+  // scheduler and whatever sets `nextReviewAt` can never disagree about what is due. No part
+  // of the interface shows dueness yet; when it does, it uses the same predicate.
   const dueForReview = available
     .filter((concept) => isReviewDue(lookup(concept.id), now))
     .map((concept) => ({ concept, overdueMs: overdueBy(lookup(concept.id), now) }))
@@ -181,6 +182,76 @@ export function describeSelection(selection: Selection): string {
     case 'new':
       return `Starting ${title}. Everything it depends on is in place.`
     case 'consolidating':
-      return `Returning to ${title}. You can get there, but not yet on your own, so it is worth another go.`
+      /*
+       * Says only what this tier actually established: developing, and as settled as repetition
+       * will make it. It used to say "you can get there, but not yet on your own" — a claim
+       * about needing help that the tier never checks. It selects on band and uncertainty and
+       * never looks at `supportSignal` or `unaidedSuccesses`, so a learner with two correct
+       * unaided answers could be told they cannot do it without help, contradicted by their own
+       * record. The string is also stored as the session's reason, so it followed them.
+       */
+      return `Coming back to ${title}. You have made progress on it without it being settled, so it is worth finishing off.`
   }
+}
+
+/**
+ * The individual grounds behind a recommendation, for the "Why this?" disclosure.
+ *
+ * Every line is derived from something the scheduler or the learner model actually holds, and
+ * each one names where it came from. Nothing here is written freehand about the learner — the
+ * requirement is that the explanation correspond to the real reason, and the way to guarantee
+ * that is to generate it from the reason rather than alongside it.
+ *
+ * No number reaches this list. The bands and the words are what the learner sees everywhere
+ * else, and "your estimate is 0.31" would be a precision the estimate does not have.
+ */
+export function groundsFor(selection: Selection, lookup: StateLookup): readonly string[] {
+  const concept = getConcept(selection.conceptId)
+  const state = lookup(selection.conceptId)
+  const grounds: string[] = []
+
+  switch (selection.reason.kind) {
+    case 'review-due': {
+      const days = Math.floor(selection.reason.overdueMs / 86_400_000)
+      grounds.push(
+        days >= 1
+          ? `It was due to be revisited ${String(days)} day${days === 1 ? '' : 's'} ago.`
+          : 'It was due to be revisited today.',
+      )
+      grounds.push('Coming back to something after a gap is what makes it stay.')
+      break
+    }
+    case 'weak':
+      grounds.push('Of the topics currently open to you, this is the one you are weakest on.')
+      break
+    case 'in-progress':
+      grounds.push('You have made a start here, but not enough to tell either way yet.')
+      grounds.push('Another go would tell the tutor more than repeating something settled.')
+      break
+    case 'new':
+      grounds.push('You have not worked on this yet.')
+      break
+    case 'consolidating':
+      // Both lines are properties of the tier itself. Nothing here claims anything about how
+      // much help the learner needed, which this tier does not look at.
+      grounds.push('You have made progress here, but it is not settled yet.')
+      grounds.push('Everything else open to you is either untouched or further along.')
+      break
+  }
+
+  // True of every selection, by construction: `availableConcepts` filters on it.
+  const prerequisites = concept.prerequisites
+  grounds.push(
+    prerequisites.length === 0
+      ? 'It does not depend on anything else, so it is open from the start.'
+      : `Everything it builds on is in place: ${prerequisites.map((id) => getConcept(id).title.toLowerCase()).join(', ')}.`,
+  )
+
+  if (state.evidenceCount > 0) {
+    grounds.push(
+      `Based on ${String(state.evidenceCount)} answer${state.evidenceCount === 1 ? '' : 's'} you have given on it so far.`,
+    )
+  }
+
+  return grounds
 }

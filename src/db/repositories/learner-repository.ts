@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { and, eq } from 'drizzle-orm'
 
 import { CONCEPTS } from '@/domain/curriculum/concepts'
-import { isConceptId } from '@/domain/curriculum/graph'
-import type { Area, ConceptId } from '@/domain/curriculum/types'
+import { isConceptId, isMisconceptionId } from '@/domain/curriculum/graph'
+import type { Area, ConceptId, MisconceptionId } from '@/domain/curriculum/types'
 import { deriveEvidence } from '@/domain/evidence/derive'
 import type { JudgedAttempt } from '@/domain/evidence/types'
 import { initialConceptState, type ConceptState } from '@/domain/learner-model/state'
@@ -399,6 +399,31 @@ export function readEvidenceFor(db: Db, conceptId: ConceptId) {
     .where(and(eq(evidenceTable.learnerId, LEARNER_ID), eq(evidenceTable.conceptId, conceptId)))
     .all()
     .sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime())
+}
+
+/**
+ * Wrong ideas seen recently, most recent first.
+ *
+ * Only what was actually observed from an attempt. The tutor is told about these so it can
+ * address them rather than re-teaching from scratch; it is not told how many times, or how
+ * long ago, because neither would change what it should say.
+ */
+export function readRecentMisconceptions(db: Db, limit = 5): readonly MisconceptionId[] {
+  const rows = db
+    .select()
+    .from(misconceptionObservation)
+    .where(eq(misconceptionObservation.learnerId, LEARNER_ID))
+    .all()
+    .sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime())
+
+  const seen: MisconceptionId[] = []
+  for (const row of rows) {
+    if (!isMisconceptionId(row.misconceptionId)) continue
+    if (seen.includes(row.misconceptionId)) continue
+    seen.push(row.misconceptionId)
+    if (seen.length >= limit) break
+  }
+  return seen
 }
 
 export function countEvidence(db: Db): number {

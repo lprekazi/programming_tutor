@@ -154,8 +154,9 @@ export function evidenceStrengthOf(state: ConceptState): EvidenceStrength {
 /**
  * Whether this concept is due to be brought back, given the current time.
  *
- * The single definition of dueness: the scheduler uses this too, so the interface and the
- * scheduler can never disagree about whether something is due.
+ * The single definition of dueness. The scheduler calls this rather than comparing timestamps
+ * of its own, so nothing can come to disagree with it about what is due — including the
+ * interface, once something there shows dueness. Nothing does yet.
  */
 export function isReviewDue(state: ConceptState, now: number): boolean {
   if (state.nextReviewAt === null) return false

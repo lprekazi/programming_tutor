@@ -23,6 +23,15 @@ import type {
 export type MockResponse =
   /** Return this value. It is still validated against the request's schema. */
   | { readonly kind: 'value'; readonly value: unknown }
+  /**
+   * Work the value out from the prompt, as a real model would.
+   *
+   * For the handful of strategies whose output must *agree* with something in the prompt — an
+   * observation has to name the concept the session is about — a fixed value can only ever be
+   * right for one situation. Deriving it keeps the fixture correct wherever it is used, instead
+   * of silently failing validation when the scheduler picks a different concept.
+   */
+  | { readonly kind: 'derive'; readonly from: (prompt: string) => unknown }
   /** Return this text, optionally split into chunks, from `streamText`. */
   | { readonly kind: 'text'; readonly chunks: readonly string[] }
   /** Simulate a provider-level failure. */
@@ -52,6 +61,15 @@ export function stablePrefixOf(
   const stable = firstDynamic === -1 ? blocks : blocks.slice(0, firstDynamic)
   return renderPrompt(stable)
 }
+
+/**
+ * How many recorded calls to keep.
+ *
+ * Bounded because the provider is now resolved once per process, so an unbounded array would
+ * retain the full text of every prompt — including every learner message and their goal — for
+ * as long as the server ran. Tests assert on the last call or two; nothing needs the hundredth.
+ */
+const MAX_RECORDED_CALLS = 20
 
 export class MockProvider implements TutorProvider {
   readonly #responses = new Map<string, MockResponse[]>()
@@ -98,9 +116,12 @@ export class MockProvider implements TutorProvider {
       )
     }
 
+    const value =
+      response.kind === 'derive' ? response.from(renderPrompt(request.blocks)) : response.value
+
     // The mock is held to the same contract as the real provider: a fixture that does
     // not satisfy the schema is a failure, not a silent pass.
-    const parsed = request.schema.safeParse(response.value)
+    const parsed = request.schema.safeParse(value)
     if (!parsed.success) {
       return {
         ok: false,
@@ -146,6 +167,7 @@ export class MockProvider implements TutorProvider {
       prompt: renderPrompt(request.blocks),
       stablePrefix: stablePrefixOf(request.blocks),
     })
+    if (this.#calls.length > MAX_RECORDED_CALLS) this.#calls.shift()
 
     const queue = this.#responses.get(strategy)
     // The last queued response is reused rather than consumed, so a test that only

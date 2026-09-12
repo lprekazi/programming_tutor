@@ -64,6 +64,25 @@ export {
 export * from './diagnostic'
 
 export {
+  CONTEXT_TURNS,
+  MAX_MESSAGE_LENGTH,
+  boundedHistory,
+  focusFor,
+  historyWasTrimmed,
+  isReturning,
+  nextOrdinal,
+  pitchFor,
+  unfinishedTutorTurn,
+} from './tutoring/session'
+export type {
+  OpeningPitch,
+  SessionFocus,
+  Turn,
+  TurnRole,
+  TurnStatus,
+} from './tutoring/session'
+
+export {
   MAX_SELF_REPORT_PRIOR,
   initialStatesFromSelfReport,
   priorFor,

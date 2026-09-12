@@ -20,7 +20,18 @@ import {
   type ConceptState,
   type EvidenceStrength,
 } from '@/domain/learner-model/state'
-import { describeSelection, selectNextConcept, stateLookupFrom } from '@/domain/scheduling/select'
+import {
+  describeSelection,
+  groundsFor,
+  selectNextConcept,
+  stateLookupFrom,
+} from '@/domain/scheduling/select'
+import {
+  readLatestOpenSession,
+  readOpenSessionConcepts,
+} from '@/db/repositories/session-repository'
+
+import { NextStep } from './NextStep'
 
 import styles from './page.module.css'
 
@@ -110,7 +121,10 @@ export default function HomePage() {
   const evidenceCount = countEvidence(db)
   const responses = readResponses(db, openDiagnostic(db, now).sessionId)
   const assessed = states.filter((state) => bandOf(state) !== 'not-started')
-  const selection = selectNextConcept(stateLookupFrom(states), now)
+  const lookup = stateLookupFrom(states)
+  const selection = selectNextConcept(lookup, now)
+  const resumable = readLatestOpenSession(db)
+  const openSessions = new Set(readOpenSessionConcepts(db))
 
   return (
     <div className={styles.page}>
@@ -136,28 +150,38 @@ export default function HomePage() {
 
       <section aria-labelledby="next-heading" className={styles.section}>
         <h2 className={styles.sectionHeading} id="next-heading">
-          Where it would start
+          Next
         </h2>
         {selection === null ? (
           <p className={styles.body} data-testid="next-concept">
             Nothing is open yet. That happens when the assessment did not reach far enough to
-            unlock anything, and the tutoring session will begin from the foundations.
+            unlock anything.
           </p>
         ) : (
-          <>
-            <p className={styles.next} data-testid="next-concept">
-              {getConcept(selection.conceptId).title}
-            </p>
-            <p className={styles.body} data-testid="next-reason">
-              {describeSelection(selection)}
-            </p>
-          </>
+          <NextStep
+            conceptId={selection.conceptId}
+            continuing={openSessions.has(selection.conceptId)}
+            grounds={groundsFor(selection, lookup)}
+            reason={describeSelection(selection)}
+            title={getConcept(selection.conceptId).title}
+          />
         )}
-        <p className={styles.pending}>
-          Guided sessions are not ready yet. For now this page shows what the short assessment
-          found, and where the tutor would begin from it.
-        </p>
       </section>
+
+      {resumable !== null && resumable.conceptId !== selection?.conceptId && (
+        <section aria-labelledby="resume-heading" className={styles.section}>
+          <h2 className={styles.sectionHeading} id="resume-heading">
+            Still open
+          </h2>
+          <p className={styles.body}>
+            You were working on{' '}
+            <Link data-testid="resume-session" href={`/session/${resumable.id}`}>
+              {getConcept(resumable.conceptId).title}
+            </Link>
+            . That conversation is still there.
+          </p>
+        </section>
+      )}
 
       <section aria-labelledby="assessed-heading" className={styles.section}>
         <h2 className={styles.sectionHeading} id="assessed-heading">

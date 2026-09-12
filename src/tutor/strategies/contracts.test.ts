@@ -37,7 +37,9 @@ const structured = ALL_STRATEGIES.filter(
 const prose = ALL_STRATEGIES.filter((strategy) => strategy.kind === 'prose')
 
 describe('every strategy', () => {
-  it('is one of the nine that were planned', () => {
+  it('is one of the ten that were planned', () => {
+    // Listed rather than counted, so adding a strategy is a deliberate act with a name
+    // attached rather than a number quietly going up.
     expect(ALL_STRATEGIES.map((strategy) => strategy.id).sort()).toEqual([
       'answer.evaluate',
       'code.feedback',
@@ -48,6 +50,7 @@ describe('every strategy', () => {
       'hint',
       'profile.update',
       'quiz.generate',
+      'session.observe',
     ])
   })
 

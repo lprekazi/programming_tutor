@@ -146,6 +146,52 @@ export async function completeDiagnostic(
   throw new Error('the diagnostic did not finish')
 }
 
+/**
+ * Onboards, answers the whole diagnostic, and lands on the profile.
+ *
+ * The precondition for everything in M4: a learner who has been through M3 and has a
+ * scheduler recommendation waiting for them.
+ */
+export async function reachHome(
+  page: Page,
+  options: { readonly goal: string; readonly experience: Experience },
+): Promise<void> {
+  await completeOnboarding(page, options)
+  await completeDiagnostic(page, true)
+  await page.getByTestId('finish-diagnostic').click()
+  await expect(page).toHaveURL(/\/home$/)
+}
+
+/**
+ * Opens a tutoring session from Home and waits for the opening turn to finish arriving.
+ *
+ * The signal is the status region going empty. The region is always in the document — a live
+ * region has to be, or its first message is not announced — so "has no text" is what "nothing
+ * is happening" looks like, rather than the element being absent.
+ */
+export async function startTutoring(page: Page): Promise<void> {
+  await page.getByTestId('start-session').click()
+  await expect(page).toHaveURL(/\/session\//)
+  await expect(page.getByTestId('turn-0')).toBeVisible()
+  await expect(page.getByTestId('session-status')).toHaveText('')
+}
+
+/**
+ * Sends a message and waits for the tutor's reply to be stored.
+ *
+ * Waits on the reply turn rather than on a delay: the status region hides itself when the
+ * stream finishes, which is a deterministic signal the page already publishes.
+ */
+export async function sendToTutor(page: Page, text: string): Promise<void> {
+  const before = await page.getByTestId('turns').locator('li').count()
+
+  await page.getByTestId('reply-input').fill(text)
+  await page.getByTestId('send-reply').click()
+
+  await expect(page.getByTestId('turns').locator('li')).toHaveCount(before + 2)
+  await expect(page.getByTestId('session-status')).toHaveText('')
+}
+
 /** How many pieces of evidence the learner model holds, read from the reset page. */
 export async function evidenceCount(page: Page): Promise<number> {
   await page.goto('/reset')

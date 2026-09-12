@@ -209,3 +209,148 @@ export type ConceptStateRow = typeof conceptState.$inferSelect
 export type DiagnosticSessionRow = typeof diagnosticSession.$inferSelect
 export type DiagnosticResponseRow = typeof diagnosticResponse.$inferSelect
 export type EvidenceRow = typeof evidence.$inferSelect
+
+/**
+ * A tutoring session: one learner working on one concept, over as many sittings as they like.
+ *
+ * Unique on `(learner, concept)`, which is what makes "Continue" mean something. Pressing
+ * Start twice, or opening the application in two tabs, finds the session that already exists
+ * rather than beginning a second conversation about the same thing — the same guarantee the
+ * diagnostic gets from its own unique constraint, and for the same reason: the check belongs
+ * in the database, where there is no window between looking and writing.
+ */
+export const tutoringSession = sqliteTable(
+  'tutoring_session',
+  {
+    id: text('id').primaryKey(),
+    learnerId: integer('learner_id')
+      .notNull()
+      .references(() => learner.id, { onDelete: 'cascade' }),
+    conceptId: text('concept_id').notNull(),
+    /**
+     * Why the scheduler chose this concept when the session began.
+     *
+     * Stored rather than recomputed, so the reason shown to the learner is the reason that
+     * actually applied at the time. Recomputing it later would quietly rewrite history — the
+     * concept may since have become due for review, or stopped being the weakest available.
+     */
+    openedReason: text('opened_reason').notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull().default(now),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(now),
+    /** Set when the learner says they are done with this concept for now. */
+    closedAt: integer('closed_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => [unique('tutoring_session_unique_concept').on(table.learnerId, table.conceptId)],
+)
+
+/**
+ * One turn of the conversation.
+ *
+ * `ordinal` is unique within a session, and that is doing real work. A tutor turn is created
+ * *before* its text is streamed, at the ordinal after the learner turn it answers — so
+ * retrying an interrupted stream computes the same ordinal, finds the same row, and rewrites
+ * it. A retry cannot append a second copy of the tutor's reply, because there is nowhere for
+ * it to go.
+ */
+export const sessionTurn = sqliteTable(
+  'session_turn',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => tutoringSession.id, { onDelete: 'cascade' }),
+    /** Position in the conversation, from zero. The tutor's opening turn is always zero. */
+    ordinal: integer('ordinal').notNull(),
+    /** `tutor` or `learner`. */
+    role: text('role').notNull(),
+    /** Whatever has arrived so far. Learner text is never an instruction; see the tutor layer. */
+    text: text('text').notNull().default(''),
+    /**
+     * `pending` before anything has arrived, `streaming` while it does, then `complete`,
+     * `cancelled` or `failed`.
+     *
+     * A cancelled turn keeps the text that did arrive, because a learner who stopped a reply
+     * half way has still read half a reply and will be confused to find it gone.
+     */
+    status: text('status').notNull().default('pending'),
+    /** Which strategy produced a tutor turn, for provenance. Null for a learner turn. */
+    strategyId: text('strategy_id'),
+    strategyVersion: text('strategy_version'),
+    /** Whatever `OPENAI_MODEL` was, or `mock`. Never a key. */
+    model: text('model'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(now),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [unique('session_turn_unique_ordinal').on(table.sessionId, table.ordinal)],
+)
+
+/**
+ * What a conversational turn appeared to be about.
+ *
+ * Deliberately **not** evidence, and deliberately not in the `evidence` table. Reading an
+ * explanation is not demonstrating anything, and a model's impression that the learner "seems
+ * to have got it" is not a performance. Nothing here reaches `concept_state`: there is no
+ * numeric field to carry it and no code path that would.
+ *
+ * What it is for is the record — which concepts actually came up, and any wrong belief the
+ * learner stated outright, so a later activity can be chosen with that in mind by a human or
+ * by a milestone that has real evidence to work with.
+ */
+export const sessionObservation = sqliteTable('session_observation', {
+  id: text('id').primaryKey(),
+  sessionId: text('session_id')
+    .notNull()
+    .references(() => tutoringSession.id, { onDelete: 'cascade' }),
+  /** The tutor turn this was observed after. */
+  turnId: text('turn_id').notNull(),
+  /** Concept ids that came up, as JSON. Discussion, not demonstration. */
+  conceptsDiscussed: text('concepts_discussed', { mode: 'json' }).$type<string[]>().notNull(),
+  /** Catalogued misconceptions the learner stated outright, as JSON. Usually empty. */
+  misconceptions: text('misconceptions', { mode: 'json' }).$type<string[]>().notNull(),
+  /** One sentence of context, for a human reading the record later. */
+  note: text('note').notNull(),
+  observedAt: integer('observed_at', { mode: 'timestamp_ms' }).notNull().default(now),
+})
+
+/**
+ * What each call to the model cost and whether it worked.
+ *
+ * The M2 log shape, finally given somewhere to live. Metadata only: there is no column here
+ * for a prompt or a response, so the learner's words cannot accumulate on disk as a side
+ * effect of the tutor being observable. The conversation is stored once, in `session_turn`,
+ * where the learner can see it and delete it.
+ */
+export const llmCall = sqliteTable(
+  'llm_call',
+  {
+    id: text('id').primaryKey(),
+    learnerId: integer('learner_id')
+      .notNull()
+      .references(() => learner.id, { onDelete: 'cascade' }),
+    strategyId: text('strategy_id').notNull(),
+    strategyVersion: text('strategy_version').notNull(),
+    policyVersion: text('policy_version').notNull(),
+    curriculumVersion: text('curriculum_version').notNull(),
+    model: text('model').notNull(),
+    latencyMs: integer('latency_ms').notNull(),
+    /**
+     * `ok`, `ok-after-repair`, `fallback`, `failed` or `cancelled`.
+     *
+     * `cancelled` is deliberately not a failure: a learner pressing Stop is ordinary use, and
+     * counting it against the system would overstate the failure rate in the one table that is
+     * meant to be the source of real numbers about how it behaved.
+     */
+    outcome: text('outcome').notNull(),
+    repairAttempted: integer('repair_attempted', { mode: 'boolean' }).notNull(),
+    repairSucceeded: integer('repair_succeeded', { mode: 'boolean' }).notNull(),
+    /** Validation problem codes, as JSON. Codes only — a detail could quote learner text. */
+    problemCodes: text('problem_codes', { mode: 'json' }).$type<string[]>().notNull(),
+    failureReason: text('failure_reason'),
+    inputTokens: integer('input_tokens'),
+    cachedInputTokens: integer('cached_input_tokens'),
+    outputTokens: integer('output_tokens'),
+    streamed: integer('streamed', { mode: 'boolean' }).notNull(),
+    at: integer('at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [index('llm_call_by_time').on(table.learnerId, table.at)],
+)

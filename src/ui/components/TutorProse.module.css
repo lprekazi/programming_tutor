@@ -1,0 +1,40 @@
+/*
+ * The tutor's own words.
+ *
+ * Measured rather than styled: the same serif-free body face as the rest of the interface,
+ * relaxed leading, and space between blocks. Nothing marks this out as machine-written,
+ * because the point is that it reads as a tutor talking rather than as output.
+ */
+.prose {
+  display: grid;
+  gap: var(--space-4);
+  line-height: var(--leading-relaxed);
+}
+
+.prose p {
+  max-width: var(--measure-prose);
+}
+
+.list {
+  display: grid;
+  gap: var(--space-2);
+  max-width: var(--measure-prose);
+  padding-left: var(--space-5);
+}
+
+/*
+ * Code the tutor wrote, as opposed to code the learner is reading in a question — same
+ * treatment, so the two never look like different kinds of thing. Scrolls inside itself so a
+ * long line cannot widen the page at 360px.
+ */
+.code {
+  padding: var(--space-4);
+  overflow-x: auto;
+  background-color: var(--ground-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  tab-size: 4;
+  white-space: pre;
+}

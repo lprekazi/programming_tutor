@@ -7,6 +7,7 @@ import { bandOf, bandRank, initialConceptState, type ConceptState } from '../lea
 import {
   availableConcepts,
   describeSelection,
+  groundsFor,
   prerequisitesMet,
   selectNextConcept,
   stateLookupFrom,
@@ -359,5 +360,112 @@ describe('progression through the curriculum', () => {
     }
 
     throw new Error('The scheduler never reached classes-and-objects.')
+  })
+})
+
+
+/*
+ * The grounds behind "Why this?".
+ *
+ * The requirement in M4 is that the explanation correspond to the real reason rather than being
+ * plausible natural language written alongside it. The way to guarantee that is to generate it
+ * from the reason, and the way to check it is to pick a selection whose reason is known and
+ * assert the grounds say that and not something else.
+ */
+describe('the grounds behind a recommendation', () => {
+  const lookupFor = (states: readonly ConceptState[]): StateLookup => stateLookupFrom(states)
+
+  it('says a concept is new when that is why it was chosen', () => {
+    const lookup = lookupFor([])
+    const selection = selectNextConcept(lookup, NOW)
+    const grounds = groundsFor(selection!, lookup)
+
+    expect(grounds).toContain('You have not worked on this yet.')
+    // An entry concept depends on nothing, and says so rather than listing an empty set.
+    expect(grounds.some((line) => line.includes('does not depend on anything else'))).toBe(true)
+  })
+
+  it('says a concept is overdue, and by how long, when that is why', () => {
+    const lookup = lookupFor([
+      ...unlock('while-loops'),
+      developing('while-loops', { nextReviewAt: NOW - 4 * DAY }),
+    ])
+    const selection = selectNextConcept(lookup, NOW)
+
+    expect(selection?.reason.kind).toBe('review-due')
+    expect(groundsFor(selection!, lookup)).toContain('It was due to be revisited 4 days ago.')
+  })
+
+  it('says "today" rather than "0 days ago"', () => {
+    const lookup = lookupFor([
+      ...unlock('while-loops'),
+      developing('while-loops', { nextReviewAt: NOW - 60_000 }),
+    ])
+    const selection = selectNextConcept(lookup, NOW)
+
+    expect(groundsFor(selection!, lookup)).toContain('It was due to be revisited today.')
+  })
+
+  it('says a concept is the weakest available when that is why', () => {
+    const lookup = lookupFor([...unlock('while-loops'), weak('while-loops')])
+    const selection = selectNextConcept(lookup, NOW)
+
+    expect(selection?.reason.kind).toBe('weak')
+    expect(groundsFor(selection!, lookup)).toContain(
+      'Of the topics currently open to you, this is the one you are weakest on.',
+    )
+  })
+
+  it('names the prerequisites it is built on, when there are any', () => {
+    const lookup = lookupFor([...unlock('while-loops'), weak('while-loops')])
+    const grounds = groundsFor(selectNextConcept(lookup, NOW)!, lookup)
+
+    expect(grounds.some((line) => line.startsWith('Everything it builds on is in place:'))).toBe(true)
+  })
+
+  it('counts the answers behind the judgement, and only when there are some', () => {
+    const fresh = lookupFor([])
+    expect(groundsFor(selectNextConcept(fresh, NOW)!, fresh).join(' ')).not.toContain('answer')
+
+    const attempted = lookupFor([...unlock('while-loops'), weak('while-loops')])
+    expect(
+      groundsFor(selectNextConcept(attempted, NOW)!, attempted).some((line) =>
+        line.includes('3 answers you have given'),
+      ),
+    ).toBe(true)
+  })
+
+  it('never exposes a number from the learner model', () => {
+    const cases: StateLookup[] = [
+      lookupFor([]),
+      lookupFor([...unlock('while-loops'), developing('while-loops', { nextReviewAt: NOW - DAY })]),
+      lookupFor([...unlock('while-loops'), weak('while-loops')]),
+      lookupFor([...unlock('while-loops'), developing('while-loops')]),
+    ]
+
+    for (const lookup of cases) {
+      const selection = selectNextConcept(lookup, NOW)
+      if (selection === null) continue
+      const text = groundsFor(selection, lookup).join(' ')
+
+      expect(text).not.toMatch(/theta|logit|uncertainty|0\.\d/)
+      expect(text).not.toMatch(/undefined|NaN|\{|\}/)
+    }
+  })
+
+  it('gives at least two grounds for every kind of reason', () => {
+    const cases: StateLookup[] = [
+      lookupFor([]),
+      lookupFor([...unlock('while-loops'), developing('while-loops', { nextReviewAt: NOW - DAY })]),
+      lookupFor([...unlock('while-loops'), weak('while-loops')]),
+      lookupFor([...unlock('while-loops'), developing('while-loops')]),
+      lookupFor([...unlock('while-loops'), secure('while-loops', { uncertainty: 0.5, theta: getConcept('while-loops').baselineDifficulty + 0.5, unaidedSuccesses: 1 })]),
+    ]
+
+    for (const lookup of cases) {
+      const selection = selectNextConcept(lookup, NOW)
+      if (selection === null) continue
+      expect(groundsFor(selection, lookup).length).toBeGreaterThanOrEqual(2)
+    }
   })
 })

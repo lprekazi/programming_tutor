@@ -1,9 +1,9 @@
 /**
  * The tutoring strategies, and the registry over them.
  *
- * Nine strategies, each one thing the tutor does. There is no tenth added speculatively:
- * every one here is called by a planned part of the product, and anything the tutor needs to
- * do that is not on this list is a gap to be noticed rather than a case to be absorbed into a
+ * Ten strategies, each one thing the tutor does. None is added speculatively: every one here
+ * is called by a planned part of the product, and anything the tutor needs to do that is not
+ * on this list is a gap to be noticed rather than a case to be absorbed into a
  * general-purpose call.
  */
 
@@ -66,10 +66,14 @@ export type {
 export { profileUpdateSchema, profileUpdateStrategy } from './profile'
 export type { ProfileUpdate, ProfileUpdateInput } from './profile'
 
+export { sessionObservationSchema, sessionObserveStrategy } from './session'
+export type { SessionObservation, SessionObserveInput } from './session'
+
 import { answerEvaluateStrategy, diagnoseStrategy, quizGenerateStrategy } from './assessment'
 import { codeFeedbackStrategy, codeTaskGenerateStrategy, hintStrategy } from './coding'
 import { profileUpdateStrategy } from './profile'
 import { converseStrategy, explainStrategy } from './prose'
+import { sessionObserveStrategy } from './session'
 
 /**
  * Every strategy, for tests and for anything that needs to enumerate them.
@@ -88,4 +92,5 @@ export const ALL_STRATEGIES = [
   codeFeedbackStrategy,
   hintStrategy,
   profileUpdateStrategy,
+  sessionObserveStrategy,
 ] as const

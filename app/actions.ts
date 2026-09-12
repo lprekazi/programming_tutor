@@ -12,12 +12,28 @@ import {
   submitAnswer,
 } from '@/db/repositories/diagnostic-repository'
 import {
+  readConceptStates,
   saveConfidence,
   saveExperience,
   saveGoal,
   reopenOnboardingAt,
   resetLearner,
 } from '@/db/repositories/learner-repository'
+import {
+  appendLearnerTurn,
+  closeSession,
+  openSession,
+  readSession,
+  readSessionByTurn,
+  readSessionForConcept,
+  recordCancellation,
+  reopenSession,
+  reserveTutorTurn,
+} from '@/db/repositories/session-repository'
+import { isConceptId } from '@/domain/curriculum/graph'
+import { MAX_MESSAGE_LENGTH, unfinishedTutorTurn } from '@/domain/tutoring/session'
+import { describeSelection, selectNextConcept, stateLookupFrom } from '@/domain/scheduling/select'
+import { converseStrategy, explainStrategy } from '@/tutor/strategies/prose'
 import type { Area, ConceptId, MisconceptionId } from '@/domain/curriculum/types'
 import type { Confidence } from '@/domain/onboarding/self-report'
 import { getDiagnosticItem, isDeterministic } from '@/domain/diagnostic/items'
@@ -419,4 +435,195 @@ export async function resetEverything(formData: FormData): Promise<ResetResult> 
   revalidatePath('/diagnostic')
   revalidatePath('/home')
   redirect('/')
+}
+
+// ---------------------------------------------------------------------------
+// Tutoring sessions
+// ---------------------------------------------------------------------------
+
+export type StartResult =
+  | { readonly status: 'ready'; readonly sessionId: string }
+  /** The scheduler has nothing to recommend. */
+  | { readonly status: 'nothing-to-study' }
+
+/**
+ * Opens the session for a concept and makes sure it has an opening turn to stream.
+ *
+ * Idempotent twice over. The session is unique on `(learner, concept)`, so pressing Start
+ * twice finds the same conversation; and the opening turn is reserved at ordinal zero, so a
+ * second press finds the same row rather than reserving another. Neither depends on the
+ * browser behaving.
+ */
+export async function startSession(conceptId: string): Promise<StartResult> {
+  const db = getDb()
+  const now = Date.now()
+
+  if (!isConceptId(conceptId)) return { status: 'nothing-to-study' }
+
+  const selection = selectNextConcept(stateLookupFrom(readConceptStates(db)), now)
+  const existing = readSessionForConcept(db, conceptId)
+
+  // A concept can be studied when the scheduler currently recommends it, or when there is
+  // already a conversation about it to continue. Anything else is a stale link or a guess at
+  // a URL, and starting teaching on the strength of one would step around the scheduler.
+  if (existing === null && selection?.conceptId !== conceptId) {
+    return { status: 'nothing-to-study' }
+  }
+
+  const reason = existing?.openedReason ?? (selection === null ? '' : describeSelection(selection))
+  const session = openSession(db, conceptId, reason, now)
+  reopenSession(db, session.id, now)
+
+  // Reserved here so the session page has a turn to stream the moment it loads. Idempotent:
+  // a second press finds the same row rather than reserving another.
+  const opening = session.turns.find((turn) => turn.ordinal === 0)
+  if (opening === undefined || opening.status !== 'complete') {
+    reserveTutorTurn(db, session.id, openingProvenance(), now)
+  }
+
+  revalidatePath('/home')
+  revalidatePath(`/session/${session.id}`)
+  return { status: 'ready', sessionId: session.id }
+}
+
+function openingProvenance() {
+  return {
+    strategyId: explainStrategy.id,
+    strategyVersion: explainStrategy.version,
+    model: resolveProvider()?.model ?? 'unavailable',
+  }
+}
+
+export type SendResult =
+  | { readonly status: 'sent'; readonly learnerTurnId: string; readonly tutorTurnId: string }
+  /** Nothing was stored. The learner's text is still in the box where they left it. */
+  | { readonly status: 'rejected'; readonly message: string }
+
+/**
+ * Stores what the learner wrote and reserves the tutor's reply.
+ *
+ * The learner's words are committed *before* any model call is attempted, which is what makes
+ * a provider failure survivable: their message is in the conversation, the tutor's turn is
+ * sitting there marked failed, and retrying re-streams into the same row.
+ */
+export async function sendMessage(sessionId: string, text: string): Promise<SendResult> {
+  const db = getDb()
+  const now = Date.now()
+  const trimmed = text.trim()
+
+  if (trimmed.length === 0) {
+    return { status: 'rejected', message: 'Write something first.' }
+  }
+  if (trimmed.length > MAX_MESSAGE_LENGTH) {
+    return {
+      status: 'rejected',
+      message: `That is longer than ${String(MAX_MESSAGE_LENGTH)} characters. Shorten it, or ask about one thing at a time.`,
+    }
+  }
+
+  const session = readSession(db, sessionId)
+  if (session === null) return { status: 'rejected', message: 'That session no longer exists.' }
+
+  /*
+   * An unfinished tutor turn is closed off rather than used to refuse the learner.
+   *
+   * Refusing was a dead end: a reply whose cancellation never reached the server sits at
+   * `pending` for ever, and the learner could then never send anything again.
+   *
+   * Only a turn that was still waiting becomes a cancellation. A turn that *failed* stays
+   * failed: telling a learner they stopped a reply the tutor dropped is a small lie, and the
+   * two endings are kept apart everywhere else precisely because they mean different things.
+   */
+  const unfinished = unfinishedTutorTurn(session.turns)
+  if (unfinished !== null && (unfinished.status === 'pending' || unfinished.status === 'streaming')) {
+    recordCancellation(db, unfinished.id, unfinished.text, now)
+  }
+
+  const appended = appendLearnerTurn(db, sessionId, trimmed, now)
+  if (!appended.stored) {
+    // Another message reached this position first — two tabs, or a click that beat the render.
+    // Said out loud rather than reporting a send that did not happen.
+    return {
+      status: 'rejected',
+      message: 'Something else was sent first. Reload the page to see where the conversation is.',
+    }
+  }
+  const tutorTurn = reserveTutorTurn(
+    db,
+    sessionId,
+    {
+      strategyId: converseStrategy.id,
+      strategyVersion: converseStrategy.version,
+      model: resolveProvider()?.model ?? 'unavailable',
+    },
+    now,
+  )
+
+  return { status: 'sent', learnerTurnId: appended.turn.id, tutorTurnId: tutorTurn.turnId }
+}
+
+/**
+ * Records that the learner stopped a reply.
+ *
+ * Said explicitly rather than inferred from the connection dropping. A client aborting its
+ * fetch does not reliably reach a streaming route handler as an abort, and when it does not,
+ * the request runs to the end and stores the reply as though it had been read — so Stop
+ * appeared to work and then the full text returned on the next reload.
+ *
+ * The text the learner actually saw is what gets stored, and `finishTutorTurn` refuses to let
+ * the request that is still finishing overwrite it.
+ */
+export async function cancelTutorTurn(turnId: string, textSoFar: string): Promise<void> {
+  const db = getDb()
+  const session = readSessionByTurn(db, turnId)
+  if (session === null) return
+
+  // Named by id, not by position: a stale client would otherwise cancel whichever turn happens
+  // to be last rather than the one it was actually streaming.
+  const turn = session.turns.find((candidate) => candidate.id === turnId)
+  if (turn === undefined || turn.role !== 'tutor' || turn.status === 'complete') return
+
+  // Capped at the same limit the domain puts on a learner message. The text is the client's
+  // account of what it displayed, which is the only source for it — but it is stored, rendered
+  // through `TutorProse`, and excluded from the conversation the model is sent, so the worst a
+  // forged value achieves is a wrong note in the learner's own transcript.
+  recordCancellation(db, turnId, textSoFar.slice(0, MAX_MESSAGE_LENGTH * 10), Date.now())
+}
+
+/**
+ * Prepares an interrupted tutor turn to be streamed again.
+ *
+ * Returns the same turn id every time, because the row already exists. That is the whole
+ * defence against a retry appending a second copy of the reply.
+ */
+export async function retryTutorTurn(sessionId: string): Promise<{ readonly turnId: string } | null> {
+  const db = getDb()
+  const session = readSession(db, sessionId)
+  if (session === null) return null
+
+  const last = unfinishedTutorTurn(session.turns)
+  if (last === null) return null
+
+  const isOpening = last.ordinal === 0
+  return {
+    turnId: reserveTutorTurn(
+      db,
+      sessionId,
+      isOpening
+        ? openingProvenance()
+        : {
+            strategyId: converseStrategy.id,
+            strategyVersion: converseStrategy.version,
+            model: resolveProvider()?.model ?? 'unavailable',
+          },
+      Date.now(),
+    ).turnId,
+  }
+}
+
+/** Marks the session finished for now. The conversation is kept and can be reopened. */
+export async function finishSession(sessionId: string): Promise<void> {
+  closeSession(getDb(), sessionId, Date.now())
+  revalidatePath('/home')
+  redirect('/home')
 }
