@@ -36,6 +36,13 @@
       "when": 1789251003057,
       "tag": "0004_session_sittings",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1789291719008,
+      "tag": "0005_programming_exercises",
+      "breakpoints": true
     }
   ]
 }

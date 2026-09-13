@@ -35,6 +35,13 @@ export interface JudgedAttempt {
    * into the depth made the evidence log say "after one hint" to somebody who had taken none.
    */
   readonly partial?: boolean | undefined
+  /**
+   * What the learner did, for the sentence in their evidence log. A question unless stated.
+   *
+   * Only the wording depends on it. An exercise and a question move the estimate by the same rule;
+   * what differs is that "answered a question" is not what somebody who wrote a function did.
+   */
+  readonly activity?: 'question' | 'exercise' | undefined
   /** Misconceptions observed, drawn from the closed catalogue. */
   readonly misconceptions: readonly MisconceptionId[]
   readonly observedAt: number

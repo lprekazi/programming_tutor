@@ -5,10 +5,12 @@ import { redirect } from 'next/navigation'
 import { getDb } from '@/db/instance'
 import { ensureLearner, readProfile } from '@/db/repositories/learner-repository'
 import { readSessionActivities } from '@/db/repositories/activity-repository'
+import { readSessionExercises } from '@/db/repositories/exercise-repository'
 import { readSession } from '@/db/repositories/session-repository'
 import { requestNow } from '@/db/request-time'
 import { presentActivity } from '@/domain/assessment/present'
 import { getConcept } from '@/domain/curriculum/graph'
+import { viewOfExercise } from '@/domain/exercises/view'
 import { resolveProvider } from '@/llm/resolve'
 
 import { SessionRunner } from './SessionRunner'
@@ -68,6 +70,17 @@ export default async function SessionPage({
           },
   }))
 
+  /*
+   * Exercises the same way, through `viewOfExercise`, which is the only assembly path to the
+   * browser and never carries the reference solution. An unverified generated exercise has no slot
+   * at all — nothing a learner could read — only a flag so the page can resume checking it.
+   */
+  const storedExercises = readSessionExercises(db, session.id)
+  const exercises = storedExercises
+    .filter((exercise) => exercise.verification === 'verified')
+    .map((exercise) => ({ turnId: exercise.turnId, view: viewOfExercise(exercise, requestNow()) }))
+  const exercisePending = storedExercises.some((exercise) => exercise.verification === 'unverified')
+
   return (
     <div className={styles.page}>
       <nav className={styles.breadcrumb}>
@@ -97,6 +110,8 @@ export default async function SessionPage({
       <SessionRunner
         checks={checks}
         conceptTitle={concept.title}
+        exercisePending={exercisePending}
+        exercises={exercises}
         sessionId={session.id}
         /*
          * An activity turn's text is a record for the model — what was asked, how it went, and

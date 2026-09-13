@@ -117,11 +117,18 @@ function describeChange(
     attempt.hintDepth === 0 ? '' : ` after ${describeHints(attempt.hintDepth)}`
   const missing = partial ? ', with part of the reasoning left unsaid' : ''
 
-  const what = attempt.correct
-    ? attempt.hintDepth === 0 && !partial
-      ? `Answered a question on ${title} correctly, unaided`
-      : `Answered a question on ${title} correctly${help}${missing}`
-    : `Did not answer a question on ${title} correctly${help}`
+  const what =
+    attempt.activity === 'exercise'
+      ? attempt.correct
+        ? attempt.hintDepth === 0
+          ? `Solved an exercise on ${title}, unaided`
+          : `Solved an exercise on ${title}${help}`
+        : `Did not yet solve an exercise on ${title}${help}`
+      : attempt.correct
+        ? attempt.hintDepth === 0 && !partial
+          ? `Answered a question on ${title} correctly, unaided`
+          : `Answered a question on ${title} correctly${help}${missing}`
+        : `Did not answer a question on ${title} correctly${help}`
 
   if (priorBand !== posteriorBand) {
     return `${what}. This moved ${title} from ${readableBand(priorBand)} to ${readableBand(posteriorBand)}.`

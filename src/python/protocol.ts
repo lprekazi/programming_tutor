@@ -12,8 +12,18 @@
 /** Maximum captured output per run, in characters. Beyond this, output is truncated. */
 export const MAX_OUTPUT_CHARS = 200_000
 
-/** Default wall-clock budget for a single learner run. */
+/** Default wall-clock budget for a single learner run, counted from when Python is ready. */
 export const DEFAULT_RUN_TIMEOUT_MS = 10_000
+
+/**
+ * How long the interpreter may take to start before it is reported as unavailable.
+ *
+ * Separate from the run budget, and much longer, because they measure different things. Loading
+ * Pyodide is roughly 13 MB on a cold start and varies with the machine and the network; a
+ * learner's program is a few lines that finish in milliseconds. Counting one against the other
+ * meant a slow start could report a trivial, correct program as having *timed out*.
+ */
+export const BOOT_TIMEOUT_MS = 60_000
 
 export type OutputStream = 'stdout' | 'stderr'
 

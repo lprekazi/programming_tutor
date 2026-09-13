@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { MAX_OUTPUT_CHARS, type WorkerEvent, type WorkerRequest } from './protocol'
+import { BOOT_TIMEOUT_MS, MAX_OUTPUT_CHARS, type WorkerEvent, type WorkerRequest } from './protocol'
 import { PythonRunner, type WorkerFactory } from './runner'
 
 /**
@@ -110,6 +110,7 @@ describe('PythonRunner', () => {
     await flush()
 
     const worker = FakeWorker.instances[0]!
+    worker.emit({ type: 'ready', pythonVersion: '3.13.0', pyodideVersion: '314.0.6' })
     worker.emit({ type: 'output', runId: worker.lastRunId, stream: 'stdout', text: 'x\n' })
     vi.advanceTimersByTime(1000)
 
@@ -119,6 +120,88 @@ describe('PythonRunner', () => {
     expect(result.stdout).toBe('x\n')
     expect(result.timeoutMs).toBe(1000)
     expect(worker.terminated).toBe(true)
+  })
+
+  /*
+   * Start-up is not the program's time.
+   *
+   * A verification worker is created fresh for every check, so it always starts cold, and on a
+   * slow machine Pyodide can take several seconds to load. With the clock started at `run()`,
+   * that load was charged to the program, and a sound exercise could be rejected as a timeout.
+   */
+  it('does not count interpreter start-up against the run budget', async () => {
+    const runner = new PythonRunner({ createWorker })
+    const pending = runner.run('print("hi")', { timeoutMs: 1000 })
+    await flush()
+
+    const worker = FakeWorker.instances[0]!
+    // Five seconds of loading, far past the one-second budget, with nothing run yet.
+    vi.advanceTimersByTime(5000)
+    expect(worker.terminated).toBe(false)
+
+    worker.emit({ type: 'ready', pythonVersion: '3.13.0', pyodideVersion: '314.0.6' })
+    worker.emit({ type: 'completed', runId: worker.lastRunId, durationMs: 4 })
+
+    expect((await pending).status).toBe('ok')
+  })
+
+  it('starts the budget once ready, and still times out a program that never ends', async () => {
+    const runner = new PythonRunner({ createWorker })
+    const pending = runner.run('while True: pass', { timeoutMs: 1000 })
+    await flush()
+
+    const worker = FakeWorker.instances[0]!
+    vi.advanceTimersByTime(3000)
+    worker.emit({ type: 'ready', pythonVersion: '3.13.0', pyodideVersion: '314.0.6' })
+    vi.advanceTimersByTime(999)
+    expect(worker.terminated).toBe(false)
+    vi.advanceTimersByTime(1)
+
+    expect((await pending).status).toBe('timeout')
+    expect(worker.terminated).toBe(true)
+  })
+
+  it('reports the interpreter as unavailable when it never finishes starting', async () => {
+    const runner = new PythonRunner({ createWorker })
+    const pending = runner.run('print("hi")')
+    await flush()
+
+    vi.advanceTimersByTime(BOOT_TIMEOUT_MS)
+
+    const result = await pending
+    // Not a timeout: nothing about the program was observed, so nothing about it is claimed.
+    expect(result.status).toBe('unavailable')
+    expect(FakeWorker.instances[0]!.terminated).toBe(true)
+  })
+
+  /*
+   * The case the interface actually meets. Run is disabled until the interpreter is ready, so
+   * nothing is waiting when the load stalls — and it still has to end in something the learner
+   * can see and retry.
+   */
+  it('reports a stalled start-up even when no run is waiting, and can start again', () => {
+    const statuses: string[] = []
+    const runner = new PythonRunner({ createWorker, onStatusChange: (status) => statuses.push(status) })
+
+    runner.warmUp()
+    vi.advanceTimersByTime(BOOT_TIMEOUT_MS)
+
+    expect(runner.status).toBe('unavailable')
+    expect(FakeWorker.instances[0]!.terminated).toBe(true)
+
+    runner.warmUp()
+    expect(FakeWorker.instances).toHaveLength(2)
+    expect(runner.status).toBe('starting')
+  })
+
+  it('does not report a start-up failure once the interpreter is ready', () => {
+    const runner = new PythonRunner({ createWorker })
+    runner.warmUp()
+    FakeWorker.instances[0]!.emit({ type: 'ready', pythonVersion: '3.13.0', pyodideVersion: '314.0.6' })
+
+    vi.advanceTimersByTime(BOOT_TIMEOUT_MS * 2)
+
+    expect(runner.status).toBe('ready')
   })
 
   it('terminates the worker when stopped and keeps the output produced so far', async () => {

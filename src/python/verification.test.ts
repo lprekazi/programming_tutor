@@ -7,6 +7,7 @@ import {
   buildVerificationProgram,
   interpretRun,
   verifyExercise,
+  verifyGeneratedExercise,
   type ExerciseBundle,
 } from './verification'
 
@@ -221,5 +222,96 @@ describe('verifyExercise', () => {
       verifyExercise(BUNDLE, { marker: MARKER, createRunner: () => runner }),
     ).rejects.toThrow('worker exploded')
     expect(disposed).toBe(true)
+  })
+})
+
+describe('verifyGeneratedExercise', () => {
+  const CANDIDATE = {
+    referenceSolution: 'def double(n):\n    return n * 2\n',
+    starterCode: 'def double(n):\n    pass\n',
+    tests: [{ name: 'doubles', code: 'assert double(2) == 4' }],
+  }
+
+  /** Answers each run in turn, and records what it was given. */
+  function scripted(...results: RunResult[]) {
+    const calls: string[] = []
+    let disposed = 0
+    const runner = {
+      run: (code: string) => {
+        calls.push(code)
+        const next = results[calls.length - 1]
+        if (next === undefined) throw new Error('more runs than scripted')
+        return Promise.resolve(next)
+      },
+      dispose: () => {
+        disposed += 1
+      },
+    } as unknown as PythonRunner
+    return { calls, create: () => runner, get disposed() { return disposed } }
+  }
+
+  const noFailures = ok(`${MARKER}{"failures": []}\n`)
+  const someFailures = ok(`${MARKER}{"failures": [{"test": "doubles", "error": "AssertionError: "}]}\n`)
+
+  it('accepts an exercise whose solution passes and whose starter does not', async () => {
+    const script = scripted(noFailures, someFailures)
+
+    const verdict = await verifyGeneratedExercise(CANDIDATE, { marker: MARKER, createRunner: script.create })
+
+    expect(verdict).toEqual({ status: 'verified' })
+    expect(script.calls[0]).toContain('return n * 2')
+    expect(script.calls[1]).toContain('pass')
+    // One interpreter for both, released once.
+    expect(script.disposed).toBe(1)
+  })
+
+  it('rejects an exercise whose reference solution fails its own checks', async () => {
+    const script = scripted(someFailures)
+
+    const verdict = await verifyGeneratedExercise(CANDIDATE, { marker: MARKER, createRunner: script.create })
+
+    expect(verdict).toMatchObject({ status: 'rejected', reason: 'reference-fails' })
+    // No point running the starter against checks the solution cannot pass.
+    expect(script.calls).toHaveLength(1)
+  })
+
+  it('rejects an exercise whose starter code already solves it', async () => {
+    const script = scripted(noFailures, noFailures)
+
+    expect(await verifyGeneratedExercise(CANDIDATE, { marker: MARKER, createRunner: script.create })).toMatchObject({
+      status: 'rejected',
+      reason: 'starter-solves',
+    })
+  })
+
+  it('rejects an exercise that does not finish in time', async () => {
+    const script = scripted({ status: 'timeout', stdout: '', stderr: '', truncated: false, timeoutMs: 10 })
+
+    expect(await verifyGeneratedExercise(CANDIDATE, { marker: MARKER, createRunner: script.create })).toMatchObject({
+      status: 'rejected',
+      reason: 'timeout',
+    })
+  })
+
+  it('says nothing about the exercise when Python could not start', async () => {
+    const script = scripted({ status: 'unavailable', message: 'no worker' })
+
+    expect(await verifyGeneratedExercise(CANDIDATE, { marker: MARKER, createRunner: script.create })).toEqual({
+      status: 'unavailable',
+      message: 'no worker',
+    })
+  })
+
+  it('is not fooled by a starter that prints a forged pass', async () => {
+    // The starter prints the harness line itself. With a real nonce it cannot know the marker;
+    // here the marker is fixed, so what is asserted is that a line *without* it is not believed.
+    const forged = ok('__exercise_verification__:forged:{"failures": []}\n')
+    const script = scripted(noFailures, forged)
+
+    const verdict = await verifyGeneratedExercise(CANDIDATE, { marker: MARKER, createRunner: script.create })
+
+    // No result line from the harness means the starter failed to report, which is a failure —
+    // and a failing starter is what an honest exercise has.
+    expect(verdict).toEqual({ status: 'verified' })
   })
 })

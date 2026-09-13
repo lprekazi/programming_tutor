@@ -409,3 +409,187 @@
   color: var(--ink-faint);
   font-size: var(--text-sm);
 }
+
+/* ---- programming exercises ---------------------------------------------------------------- */
+
+/*
+ * One readable column, top to bottom: the task, what it will be checked for, the editor, what
+ * happened, the result. Hairline rules and spacing do the separating, as they do for a question;
+ * nothing here is a panel, a card or a toolbar, because this is part of the lesson and not an IDE
+ * set into the page.
+ */
+.exercise {
+  display: grid;
+  gap: var(--space-4);
+  /* Grid children default to min-width: auto, which lets a long line of code widen the page. */
+  min-width: 0;
+}
+
+.exercise > * {
+  min-width: 0;
+}
+
+.exerciseTitle {
+  font-family: var(--font-serif);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-tight);
+}
+
+.brief {
+  max-width: var(--measure-prose);
+  font-size: var(--text-lg);
+  line-height: var(--leading-relaxed);
+}
+
+.checkList ul {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-left: var(--space-5);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.editorBlock {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.runControls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.runControls .primary,
+.runControls .secondary {
+  min-height: 2.75rem;
+}
+
+/* A hint is on offer, not pressed on the learner: a text button, not a third solid one. */
+.quietButton {
+  min-height: 2.75rem;
+  padding: 0 var(--space-2);
+  background: none;
+  border: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.quietButton:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.quietButton:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.interpreter {
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+
+.exerciseStatus {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.hints {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.outputBlock {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.outputEmpty {
+  color: var(--ink-faint);
+  font-size: var(--text-sm);
+}
+
+/* The learner's output and any traceback: text, in its own scrolling block, never the page's width. */
+.output,
+.traceback {
+  max-height: 16rem;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  background-color: var(--ground-sunken);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  tab-size: 4;
+  white-space: pre;
+}
+
+/* Told apart by a rule and a label word in the traceback itself, not by red text. */
+.traceback {
+  border-left: 2px solid var(--caution);
+}
+
+.runNote {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.checkResults {
+  display: grid;
+  gap: var(--space-1);
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}
+
+/* The word carries the meaning; weight is the only emphasis. */
+.checkWord {
+  font-weight: var(--weight-semibold);
+}
+
+.checkError {
+  color: var(--ink-muted);
+}
+
+.notes {
+  display: grid;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--rule);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.notesLabel {
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.earlier {
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+}
+
+.earlier summary {
+  cursor: pointer;
+}
+
+.earlier ol {
+  display: grid;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+  padding-left: var(--space-5);
+}

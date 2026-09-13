@@ -326,6 +326,7 @@ describe('R-07: a solution cannot hide in the starter docstring', () => {
     // this — it only proves the reference solution passes its own tests.
     const problems = codeTaskGenerateStrategy.checkInvariants(
       {
+        conceptId: 'for-loops-and-range',
         title: 'Count the evens',
         brief: 'Count the even numbers.',
         starterCode:
@@ -347,6 +348,7 @@ describe('R-07: a solution cannot hide in the starter docstring', () => {
   it('still accepts an ordinary stub', () => {
     const problems = codeTaskGenerateStrategy.checkInvariants(
       {
+        conceptId: 'for-loops-and-range',
         title: 'Count the evens',
         brief: 'Count the even numbers.',
         starterCode: 'def count_evens(numbers):\n    """Return how many are even."""\n    pass\n',

@@ -77,10 +77,19 @@ Working today:
 - One nudge per question, which counts for less than working it out unaided and never against
   the learner
 - A profile that shows, per concept, the dated answers behind every change
+- Short programming exercises inside the lesson — writing a function, or repairing one that is wrong
+  in a specific way — in a CodeMirror editor, with Run and Stop in the browser's Python
+- Exercises marked by running named checks against the code; the first submission that can be
+  marked is the one that counts, and later ones are marked so the learner can see their code working
+- A three-step hint ladder per exercise that never contains the solution, checked against the
+  exercise's own reference solution
+- Generated exercises verified in the browser before anyone sees them: the reference solution must
+  pass its checks and the starter code must not, with one regeneration and an authored fallback
+- Misconceptions named from practical work only where both the pattern of results and the code
+  itself show the belief, each rule run against a program that holds it and programs that do not
 
-Planned, milestone by milestone: programming and debugging exercises with a full hint ladder, the
-review and export views, accessibility hardening, evaluation, and optional grounding in uploaded
-study material.
+Planned, milestone by milestone: the review and export views, accessibility hardening, evaluation,
+and optional grounding in uploaded study material.
 
 ## Architecture
 
@@ -211,6 +220,13 @@ is deterministic and needs no key. Testing against the live API is a manual step
   which is allowed to say it cannot tell — and when it says so, or when no provider is
   reachable, the answer is kept, shown as unmarked, and changes nothing about the learner. An
   unmarked answer is better than an invented one.
+- **An exercise's checks run in the browser, so the browser is given them.** They are never shown,
+  but developer tools can read them, and the result the server records is the one the browser
+  reports. A generated exercise's reference solution also passes through the browser once, to be
+  verified. Nothing here is described as secret or tamper-proof.
+- **Only the first markable submission of an exercise counts.** A learner who fails and then fixes
+  their code records the failure for that exercise; the later, passing submission is shown but not
+  counted, and the page says so.
 - **Ten of 33 concepts have no authored question.** A check on one of those is generated, and a
   generated question that fails validation is not asked at all, so the tutor sometimes has
   nothing to ask.
@@ -225,7 +241,7 @@ is deterministic and needs no key. Testing against the live API is a manual step
 | M3 | Onboarding and diagnostic assessment ✅ |
 | M4 | Home, session view, conversational tutoring ✅ |
 | M5 | Quizzes, code reading, evaluation and feedback ✅ |
-| M6 | Programming exercises, execution and progressive hints |
+| M6 | Programming exercises, execution and progressive hints ✅ |
 | M7 | Review scheduling, persistence, reset and export |
 | M8 | Accessibility, responsiveness and hardening |
 | M9 | Evaluation and documentation |

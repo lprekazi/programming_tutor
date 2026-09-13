@@ -177,3 +177,95 @@ export async function verifyExercise(
     runner.dispose()
   }
 }
+
+export interface CandidateBundle {
+  readonly referenceSolution: string
+  readonly starterCode: string
+  readonly tests: readonly VerificationTest[]
+}
+
+/** Why a generated exercise was not accepted. Recorded in the generation log. */
+export type RejectionReason =
+  /** The reference solution does not pass its own checks, or does not run at all. */
+  | 'reference-fails'
+  /** The starter code already passes every check, so there is nothing for the learner to do. */
+  | 'starter-solves'
+  /** Either program ran out of time. */
+  | 'timeout'
+
+export type CandidateVerdict =
+  | { readonly status: 'verified' }
+  | { readonly status: 'rejected'; readonly reason: RejectionReason; readonly detail: string }
+  /** Python could not be started, so nothing is known about the exercise either way. */
+  | { readonly status: 'unavailable'; readonly message: string }
+
+/**
+ * Checks a generated exercise the two ways that decide whether it can be set.
+ *
+ *   1. **The reference solution passes every check.** Otherwise the checks disagree with the
+ *      task — or the solution does — and a learner who solved it would be marked wrong.
+ *   2. **The starter code does not.** Otherwise the exercise is already done, and a learner
+ *      who changed nothing would be recorded as having solved it. Verification of the reference
+ *      alone cannot see this: it would happily pass an exercise that needed no work.
+ *
+ * Both run through the nonce-marked harness, because both programs are model-written: a starter
+ * that printed a forged "no failures" line would otherwise pass for one that solves nothing, and
+ * a forged line in the reference would pass for one that works.
+ *
+ * One dedicated interpreter for both runs, started once and then discarded. The run budget
+ * applies to each program separately and — since the runner no longer counts start-up against
+ * it — only to the programs themselves.
+ */
+export async function verifyGeneratedExercise(
+  bundle: CandidateBundle,
+  options: VerifyOptions = {},
+): Promise<CandidateVerdict> {
+  const runner = options.createRunner?.() ?? new PythonRunner()
+  const timeoutMs = options.timeoutMs ?? DEFAULT_VERIFICATION_TIMEOUT_MS
+
+  try {
+    const referenceMarker = options.marker ?? createMarker()
+    const reference = interpretRun(
+      await runner.run(
+        buildVerificationProgram({ referenceSolution: bundle.referenceSolution, tests: bundle.tests }, referenceMarker),
+        { timeoutMs },
+      ),
+      referenceMarker,
+    )
+
+    if (reference.status === 'unavailable') return reference
+    if (reference.status === 'timeout') {
+      return { status: 'rejected', reason: 'timeout', detail: 'The reference solution did not finish in time.' }
+    }
+    if (reference.status === 'failed') {
+      return { status: 'rejected', reason: 'reference-fails', detail: reference.detail }
+    }
+
+    const starterMarker = options.marker ?? createMarker()
+    const starter = interpretRun(
+      await runner.run(
+        buildVerificationProgram({ referenceSolution: bundle.starterCode, tests: bundle.tests }, starterMarker),
+        { timeoutMs },
+      ),
+      starterMarker,
+    )
+
+    switch (starter.status) {
+      case 'unavailable':
+        return starter
+      case 'timeout':
+        return { status: 'rejected', reason: 'timeout', detail: 'The starter code did not finish in time.' }
+      case 'passed':
+        return {
+          status: 'rejected',
+          reason: 'starter-solves',
+          detail: 'The starter code already passes every check.',
+        }
+      case 'failed':
+        // Failing is exactly what starter code should do.
+        return { status: 'verified' }
+    }
+  } finally {
+    runner.dispose()
+  }
+}

@@ -45,6 +45,7 @@ import {
   type ActivityRecord,
 } from '@/db/repositories/activity-repository'
 import { DatabaseCallLog } from '@/db/repositories/call-log-repository'
+import { readSessionExercises } from '@/db/repositories/exercise-repository'
 import {
   composeFeedback,
   markChoice,
@@ -571,7 +572,15 @@ export async function sendMessage(sessionId: string, text: string): Promise<Send
    * two endings are kept apart everywhere else precisely because they mean different things.
    */
   const unfinished = unfinishedTutorTurn(session.turns)
-  if (unfinished !== null && (unfinished.status === 'pending' || unfinished.status === 'streaming')) {
+  if (
+    unfinished !== null &&
+    unfinished.role === 'tutor' &&
+    (unfinished.status === 'pending' || unfinished.status === 'streaming')
+  ) {
+    // A reply only. An unfinished *activity* turn is a question or an exercise still being
+    // prepared — an exercise can sit unverified while the browser checks it — and cancelling it
+    // would leave that exercise with a turn nothing is allowed to complete, since a cancelled row
+    // is never overwritten.
     recordCancellation(db, unfinished.id, unfinished.text, now)
   }
 
@@ -706,6 +715,20 @@ export async function askCheck(sessionId: string): Promise<CheckResult> {
   const activities = readSessionActivities(db, sessionId)
   const existing = activities.find((activity) => activity.attempt === null)
   if (existing !== undefined) return { status: 'asked', activityId: existing.id }
+
+  // One thing at a time, across both kinds: a question on top of an exercise the learner has not
+  // submitted yet — or one still being prepared — would leave two things waiting.
+  const openExercise = readSessionExercises(db, sessionId).some(
+    (exercise) =>
+      exercise.verification === 'unverified' ||
+      (exercise.verification === 'verified' && exercise.submissions.length === 0),
+  )
+  if (openExercise) {
+    return {
+      status: 'unavailable',
+      message: 'There is an exercise above still waiting. Submit it first, then ask again.',
+    }
+  }
 
   const decision = decideCheck({
     conceptId: session.conceptId,

@@ -511,3 +511,175 @@ export const activityHint = sqliteTable(
   },
   (table) => [unique('activity_hint_unique_depth').on(table.activityId, table.depth)],
 )
+
+// ---------------------------------------------------------------------------------------------
+// M6: programming exercises
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A programming exercise set inside a session.
+ *
+ * One row per position in the conversation (`turn_id` is unique), for the same reason a question
+ * has one: a double-click or a remount finds the exercise already there instead of setting a
+ * second one. The row is the exercise's identity for the rest of its life — a learner who comes
+ * back finds the same task, not a fresh draw.
+ *
+ * A generated exercise is written here *before* it is verified, as `unverified`, and may be
+ * replaced by one regeneration or a fallback while it is still unverified. Once `verified` its
+ * content is fixed. Nothing unverified is ever presented to the learner.
+ */
+export const sessionExercise = sqliteTable(
+  'session_exercise',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => tutoringSession.id, { onDelete: 'cascade' }),
+    turnId: text('turn_id').notNull(),
+    conceptId: text('concept_id').notNull(),
+    /** `write` or `fix`. */
+    kind: text('kind').notNull(),
+    /** `authored` or `generated`. */
+    origin: text('origin').notNull(),
+    /** The authored exercise this is, or null when generated. */
+    exerciseId: text('exercise_id'),
+    /** Which version of the authored bank it came from. Null when generated. */
+    bankVersion: text('bank_version'),
+    title: text('title').notNull(),
+    brief: text('brief').notNull(),
+    starterCode: text('starter_code').notNull(),
+    /** Named checks. Their code reaches the browser, because that is where they run. */
+    tests: text('tests', { mode: 'json' }).$type<{ name: string; code: string }[]>().notNull(),
+    /** Never presented. Reaches the browser only to verify a generated exercise (ADR-0006). */
+    referenceSolution: text('reference_solution').notNull(),
+    /** Result patterns specific enough to name a misconception. Empty for a generated exercise. */
+    signals: text('signals', { mode: 'json' })
+      .$type<
+        {
+          misconception: string
+          pattern: ('pass' | 'fail')[]
+          codeShows: string
+          codeLacks?: string
+          witness: string
+          counterexamples: string[]
+        }[]
+      >()
+      .notNull(),
+    /** The authored hint ladder, or null when hints are written on request. */
+    authoredHints: text('authored_hints', { mode: 'json' }).$type<string[]>(),
+    /** Declared difficulty. A prior, never revised (ADR-0004). */
+    difficulty: real('difficulty').notNull(),
+    selectionGround: text('selection_ground').notNull(),
+    /** `unverified`, `verified` or `rejected`. */
+    verification: text('verification').notNull(),
+    /** 0 for authored; 1 for a first generation; 2 after the one permitted regeneration. */
+    generationAttempt: integer('generation_attempt').notNull().default(0),
+    strategyId: text('strategy_id'),
+    strategyVersion: text('strategy_version'),
+    model: text('model'),
+    /** The learner's latest code, saved as they work. Null until they change anything. */
+    draftCode: text('draft_code'),
+    /** When that code was written, by the browser's clock, so a late save cannot overwrite a newer one. */
+    draftEditedAt: integer('draft_edited_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [unique('session_exercise_unique_turn').on(table.turnId)],
+)
+
+/**
+ * A hint taken on an exercise.
+ *
+ * Unique per depth, so the ladder cannot be skipped or double-counted: asking for hint 2 twice
+ * finds the same hint, and hint 3 cannot exist without hint 2. How many were taken before the
+ * first submission is what attenuates the evidence (ADR-0005) — read from these rows at the
+ * moment of submitting, never from a field that also means something else (M5 finding F-02).
+ */
+export const exerciseHint = sqliteTable(
+  'exercise_hint',
+  {
+    id: text('id').primaryKey(),
+    exerciseId: text('exercise_id')
+      .notNull()
+      .references(() => sessionExercise.id, { onDelete: 'cascade' }),
+    depth: integer('depth').notNull(),
+    text: text('text').notNull(),
+    /** `authored` or `model`. */
+    source: text('source').notNull(),
+    strategyId: text('strategy_id'),
+    strategyVersion: text('strategy_version'),
+    model: text('model'),
+    askedAt: integer('asked_at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [unique('exercise_hint_unique_depth').on(table.exerciseId, table.depth)],
+)
+
+/**
+ * A submission of code for an exercise.
+ *
+ * Two unique constraints, doing different jobs:
+ *
+ *   - `(exercise_id, code_hash)` — submitting the same code again, whether by double-click,
+ *     retry, reload or a replayed action, finds the same row and changes nothing;
+ *   - `(exercise_id, ordinal)` — submissions are numbered, and only **the first** produces
+ *     evidence. A later one, after feedback, is marked and shown so the learner can finish the
+ *     task, but answering again with the checks' results in front of you is not independent
+ *     evidence of anything (ADR-0029).
+ */
+export const exerciseSubmission = sqliteTable(
+  'exercise_submission',
+  {
+    id: text('id').primaryKey(),
+    exerciseId: text('exercise_id')
+      .notNull()
+      .references(() => sessionExercise.id, { onDelete: 'cascade' }),
+    ordinal: integer('ordinal').notNull(),
+    code: text('code').notNull(),
+    codeHash: text('code_hash').notNull(),
+    /** What the browser reported running it produced. */
+    outcome: text('outcome', { mode: 'json' }).$type<unknown>().notNull(),
+    /** `passed`, `failed`, `crashed` or `unmarked`. */
+    state: text('state').notNull(),
+    passedChecks: integer('passed_checks'),
+    totalChecks: integer('total_checks').notNull(),
+    unmarkedReason: text('unmarked_reason'),
+    /** Misconceptions a whole-pattern signal matched. Observed only when this submission counted. */
+    misconceptions: text('misconceptions', { mode: 'json' }).$type<string[]>().notNull(),
+    /** Hints actually taken before this submission. The truth, whatever the evidence did with it. */
+    hintsTaken: integer('hints_taken').notNull(),
+    /** True when this submission produced the exercise's evidence. At most one per exercise. */
+    counted: integer('counted', { mode: 'boolean' }).notNull(),
+    /** `pending`, `given`, `unavailable` or `not-requested`. */
+    feedbackStatus: text('feedback_status').notNull(),
+    feedback: text('feedback', { mode: 'json' }).$type<unknown>(),
+    feedbackStrategyId: text('feedback_strategy_id'),
+    feedbackStrategyVersion: text('feedback_strategy_version'),
+    feedbackModel: text('feedback_model'),
+    submittedAt: integer('submitted_at', { mode: 'timestamp_ms' }).notNull().default(now),
+  },
+  (table) => [
+    unique('exercise_submission_unique_code').on(table.exerciseId, table.codeHash),
+    unique('exercise_submission_unique_ordinal').on(table.exerciseId, table.ordinal),
+  ],
+)
+
+/**
+ * Every attempt to prepare a generated exercise, and how it ended.
+ *
+ * Reportable evidence about generation reliability: how often a model's exercise failed its own
+ * checks, solved itself from the starter code, or ran out of time. Content is not recorded here —
+ * only which attempt, what happened, and which prompt and model produced it.
+ */
+export const exerciseGenerationLog = sqliteTable('exercise_generation_log', {
+  id: text('id').primaryKey(),
+  exerciseId: text('exercise_id')
+    .notNull()
+    .references(() => sessionExercise.id, { onDelete: 'cascade' }),
+  attempt: integer('attempt').notNull(),
+  /** `verified`, `rejected`, `invalid`, `unavailable` or `fallback`. */
+  outcome: text('outcome').notNull(),
+  /** A short code: `reference-fails`, `starter-solves`, `timeout`, `no-report`, and so on. */
+  reason: text('reason'),
+  strategyVersion: text('strategy_version'),
+  model: text('model'),
+  at: integer('at', { mode: 'timestamp_ms' }).notNull().default(now),
+})

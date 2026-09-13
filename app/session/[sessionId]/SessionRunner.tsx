@@ -4,12 +4,17 @@ import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { PresentedActivity } from '@/domain/assessment/present'
+import type { ExerciseHold } from '@/domain/exercises/select'
+import type { ExerciseView } from '@/domain/exercises/view'
 import { MAX_MESSAGE_LENGTH, type Turn } from '@/domain/tutoring/session'
+import { verifyGeneratedExercise } from '@/python/verification'
 import { FAILURE_MARKER } from '@/tutor/session/stream-protocol'
 import { TutorProse } from '@/ui/components/TutorProse'
 
 import { askCheck, cancelTutorTurn, finishSession, retryTutorTurn, sendMessage } from '../../actions'
+import { askExercise, recordExerciseVerification, type ExerciseResult } from '../../exercise-actions'
 import { Check, type AnsweredView } from './Check'
+import { Exercise } from './Exercise'
 
 import styles from './page.module.css'
 
@@ -37,11 +42,29 @@ export interface CheckSlot {
   readonly answered: AnsweredView | null
 }
 
+/** An exercise, keyed to the turn it occupies. Only a verified exercise ever has a slot. */
+export interface ExerciseSlot {
+  readonly turnId: string
+  readonly view: ExerciseView
+}
+
 interface Props {
   readonly sessionId: string
   readonly conceptTitle: string
   readonly turns: readonly Turn[]
   readonly checks: readonly CheckSlot[]
+  readonly exercises: readonly ExerciseSlot[]
+  /** True when a generated exercise was left waiting for verification, so it can be resumed. */
+  readonly exercisePending: boolean
+}
+
+/** Why an exercise is not being set right now. Each is the selector's real reason. */
+const EXERCISE_HOLD_WORDS: Readonly<Record<ExerciseHold, string>> = {
+  'too-early': 'Talk it through a little first — there is nothing yet to put into code.',
+  'finish-open-one': 'Finish what is already waiting above first.',
+  'enough-for-now': 'That is enough exercises for one sitting. Ask about anything that is still unclear.',
+  'nothing-to-learn':
+    'You are solid on this one, with enough behind it that an exercise would not tell either of us anything new.',
 }
 
 type Phase =
@@ -73,7 +96,7 @@ const HOLD_WORDS: Readonly<Record<string, string>> = {
     'You are solid on this one, with enough behind it that another question would not tell either of us anything new.',
 }
 
-export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props) {
+export function SessionRunner({ sessionId, conceptTitle, turns, checks, exercises, exercisePending }: Props) {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   /** Text arriving right now, for the turn named in `phase`. Never the whole conversation. */
@@ -101,6 +124,12 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props)
 
   /** A check that has been asked and not yet answered. The learner owes it an answer. */
   const openCheck = checks.find((slot) => slot.answered === null)
+
+  const exerciseFor = (turnId: string): ExerciseSlot | undefined =>
+    exercises.find((slot) => slot.turnId === turnId)
+
+  /** An exercise on the page with nothing submitted yet. */
+  const openExercise = exercises.find((slot) => slot.view.submissions.length === 0)
 
   /**
    * The tutor turn the page is currently working on, finished or not.
@@ -260,6 +289,70 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props)
       })
   }, [router, sessionId])
 
+  const [preparing, setPreparing] = useState(false)
+
+  /**
+   * Sets an exercise, verifying a generated one in the browser first.
+   *
+   * The bundle a generated candidate carries lives only in this function's locals: handed to a
+   * dedicated verification worker and dropped. It is never put in state, never rendered and never
+   * stored in the browser (ADR-0006). The loop is bounded by the server, which allows one
+   * regeneration before falling back.
+   */
+  const settleExercise = useCallback(
+    async (first: ExerciseResult) => {
+      let result = first
+      for (let round = 0; round < 4 && result.status === 'verify'; round += 1) {
+        setProblem('Preparing an exercise: checking it works before it is shown to you.')
+        const verdict = await verifyGeneratedExercise(result.bundle)
+        result = await recordExerciseVerification(
+          result.exerciseId,
+          result.bundle.candidate,
+          verdict.status === 'rejected' ? { status: 'rejected', reason: verdict.reason } : { status: verdict.status },
+        )
+      }
+
+      if (result.status === 'held') {
+        setProblem(EXERCISE_HOLD_WORDS[result.because])
+        return
+      }
+      if (result.status === 'unavailable') {
+        setProblem(result.message)
+        return
+      }
+      if (result.status === 'verify') {
+        setProblem('An exercise could not be prepared just now.')
+        return
+      }
+      setProblem(null)
+      router.refresh()
+    },
+    [router],
+  )
+
+  const exercise = useCallback(() => {
+    setPreparing(true)
+    setProblem(null)
+
+    askExercise(sessionId)
+      .then(settleExercise)
+      .catch(() => {
+        setProblem('An exercise could not be prepared just now.')
+      })
+      .finally(() => {
+        setPreparing(false)
+      })
+  }, [sessionId, settleExercise])
+
+  // An exercise left half-prepared by a reload is picked up again rather than abandoned, and
+  // rather than a new one being generated in its place.
+  const resumedRef = useRef(false)
+  useEffect(() => {
+    if (!exercisePending || resumedRef.current) return
+    resumedRef.current = true
+    exercise()
+  }, [exercise, exercisePending])
+
   const retry = useCallback(() => {
     setProblem(null)
     inputRef.current?.focus()
@@ -302,8 +395,9 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props)
       turn.text.trim().length > 0 ||
       turn.id === currentTutorTurn?.id ||
       // An activity turn's own text is a record for the model, not something to render, so a
-      // check is kept in the sequence on the strength of the check existing.
-      checkFor(turn.id) !== undefined,
+      // check or an exercise is kept in the sequence on the strength of it existing.
+      checkFor(turn.id) !== undefined ||
+      exerciseFor(turn.id) !== undefined,
   )
   const remaining = MAX_MESSAGE_LENGTH - draft.length
 
@@ -315,6 +409,21 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props)
           // of the text that arrived, until a reload replaces it with the stored one.
           const isCurrent = turn.id === currentTutorTurn?.id
           const text = isCurrent && live.length > 0 ? live : turn.text
+
+          const exerciseSlot = exerciseFor(turn.id)
+          if (exerciseSlot !== undefined) {
+            return (
+              <li
+                className={styles.checkTurn}
+                data-role="activity"
+                data-testid={`turn-${String(turn.ordinal)}`}
+                data-turn-id={turn.id}
+                key={turn.id}
+              >
+                <Exercise view={exerciseSlot.view} />
+              </li>
+            )
+          }
 
           const slot = checkFor(turn.id)
           if (slot !== undefined) {
@@ -395,7 +504,7 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props)
             Try again
           </button>
         )}
-        {!streaming && openCheck === undefined && (
+        {!streaming && openCheck === undefined && openExercise === undefined && (
           /*
            * The learner asks to be tested, rather than being tested at them. Whether a question
            * is worth asking is still the scheduler's decision — pressing this can come back
@@ -412,6 +521,26 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks }: Props)
           >
             Check my understanding
           </button>
+        )}
+        {!streaming && openCheck === undefined && openExercise === undefined && (
+          /*
+           * The same principle as the check: the learner chooses the moment, and the selector may
+           * still say not now, with its reason. Nothing is set automatically.
+           */
+          <button
+            className={styles.secondary}
+            data-testid="ask-exercise"
+            disabled={preparing || busy}
+            onClick={exercise}
+            type="button"
+          >
+            {preparing ? 'Preparing…' : 'Try a short exercise'}
+          </button>
+        )}
+        {!streaming && openCheck === undefined && openExercise !== undefined && (
+          <p className={styles.pending} data-testid="exercise-pending">
+            There is an exercise above still waiting for a submission.
+          </p>
         )}
         {!streaming && openCheck !== undefined && (
           /*

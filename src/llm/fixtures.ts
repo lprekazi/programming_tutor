@@ -138,6 +138,7 @@ export const CODE_FEEDBACK: MockResponse = {
 export const CODE_TASK: MockResponse = {
   kind: 'value',
   value: {
+    conceptId: 'for-loops-and-range',
     title: 'Count the evens',
     brief: 'Write a function count_evens(numbers) that returns how many numbers in the list are even.',
     starterCode: 'def count_evens(numbers):\n    """Return how many numbers in the list are even."""\n    pass\n',
@@ -149,6 +150,66 @@ export const CODE_TASK: MockResponse = {
     ],
     declaredDifficulty: 'typical',
   },
+}
+
+/**
+ * A generated exercise on whichever concept was asked for.
+ *
+ * Derived rather than fixed, for the reason `session.observe` is: a generated exercise has to name
+ * the concept it was requested for, and a fixed value is right for exactly one concept. The task
+ * itself stays the same small, verifiable one — what matters to the pipeline is that it passes
+ * its own checks and its starter does not.
+ */
+export const CODE_TASK_FOR_REQUESTED_CONCEPT: MockResponse = {
+  kind: 'derive',
+  from: (prompt) => {
+    const requested = /WRITE AN EXERCISE ON: ([a-z-]+)/.exec(prompt)?.[1] ?? 'for-loops-and-range'
+    const base = (CODE_TASK as { value: Record<string, unknown> }).value
+    return {
+      ...base,
+      conceptId: requested,
+      title: 'Largest in a list',
+      brief: 'Write largest(numbers) so it returns the biggest number in a non-empty list, without using max().',
+      starterCode: 'def largest(numbers):\n    """Return the biggest number in the list."""\n    pass\n',
+      referenceSolution:
+        'def largest(numbers):\n    best = numbers[0]\n    for number in numbers:\n        if number > best:\n            best = number\n    return best\n',
+      tests: [
+        { name: 'finds the biggest in a mixed list', code: 'assert largest([3, 9, 2]) == 9' },
+        { name: 'works when the biggest comes first', code: 'assert largest([7, 1]) == 7' },
+        { name: 'works with negative numbers', code: 'assert largest([-4, -2, -8]) == -2' },
+      ],
+    }
+  },
+}
+
+/**
+ * Feedback that agrees with the checks, whatever they decided.
+ *
+ * The real strategy is told the result and held to it; the mock reads the same `RESULT:` line, so
+ * a passing attempt is never told it is wrong by the fixture the end-to-end suite runs against.
+ * Deliberately generic — it does not pretend to have read the code.
+ */
+export const CODE_FEEDBACK_AGREEING: MockResponse = {
+  kind: 'derive',
+  from: (prompt) =>
+    prompt.includes('RESULT: passed')
+      ? {
+          summary: 'Every check passes.',
+          observations: [],
+          nextStep: 'Before moving on, predict what your code gives for an input the checks did not try, then run it to see whether you were right.',
+          misconceptions: [],
+        }
+      : {
+          summary: 'Some of the checks do not pass yet.',
+          observations: [
+            {
+              where: 'the first check that does not pass',
+              what: 'Work out by hand what your code gives back for that input, and compare it with what the check expects.',
+            },
+          ],
+          nextStep: 'Add a print just before the return to see the value you are giving back, then run it again.',
+          misconceptions: [],
+        },
 }
 
 /** A hypothesis about a repeated mistake, with a question that would test it. */
@@ -410,7 +471,15 @@ export function flakyTutor(): TutorProvider {
   const MAX_KEYS = 40
 
   return {
-    structured: (request) => inner.structured(request),
+    structured: (request) =>
+      // Code feedback always fails here: the case where the checks have decided and the notes
+      // cannot be written, which must leave the result and the evidence exactly as they were.
+      request.strategy === 'code.feedback'
+        ? Promise.resolve({
+            ok: false,
+            failure: { reason: 'refused', message: 'The tutor declined to comment on this code.' },
+          })
+        : inner.structured(request),
     streamText: (request, signal) => {
       const key = renderPrompt(request.blocks)
 
@@ -472,8 +541,8 @@ export function workingTutor(): MockProvider {
     .on('quiz.generate', QUIZ_ON_RANGE)
     .on('answer.evaluate', ANSWER_CORRECT)
     .on('diagnose', DIAGNOSIS)
-    .on('code.task.generate', CODE_TASK)
-    .on('code.feedback', CODE_FEEDBACK)
+    .on('code.task.generate', CODE_TASK_FOR_REQUESTED_CONCEPT)
+    .on('code.feedback', CODE_FEEDBACK_AGREEING)
     .on('hint', HINT_ORIENTING)
     .on('profile.update', PROFILE_OBSERVATION)
 }

@@ -9,6 +9,7 @@
  */
 
 import {
+  BOOT_TIMEOUT_MS,
   DEFAULT_RUN_TIMEOUT_MS,
   MAX_OUTPUT_CHARS,
   type OutputStream,
@@ -51,9 +52,11 @@ interface PendingRun {
   readonly runId: string
   readonly settle: (result: RunResult) => void
   readonly onOutput: ((stream: OutputStream, text: string) => void) | undefined
+  readonly timeoutMs: number
   stdout: string
   stderr: string
   truncated: boolean
+  /** The run's own budget. Started only once the interpreter is ready. */
   timer: ReturnType<typeof setTimeout> | undefined
 }
 
@@ -79,6 +82,15 @@ export class PythonRunner {
   readonly #onStatusChange: ((status: RunnerStatus) => void) | undefined
   #worker: Worker | null = null
   #pending: PendingRun | null = null
+  /**
+   * The start-up allowance, for the worker rather than for a run.
+   *
+   * It used to exist only while a run was waiting. But Run and Submit stay disabled until the
+   * interpreter is ready, so after `warmUp()` no run ever waits — and a download that stalled left
+   * "Python is starting…" on screen for ever, with no error and no way to retry (M6 review
+   * finding F-12). Now the worker has its own deadline from the moment it is created.
+   */
+  #bootTimer: ReturnType<typeof setTimeout> | undefined
   #status: RunnerStatus = 'idle'
   #pythonVersion: string | null = null
   #nextRunId = 0
@@ -127,26 +139,44 @@ export class PythonRunner {
         runId,
         settle: resolve,
         onOutput: options.onOutput,
+        timeoutMs,
         stdout: '',
         stderr: '',
         truncated: false,
         timer: undefined,
       }
-      pending.timer = setTimeout(() => {
-        this.#finish({
-          status: 'timeout',
-          stdout: pending.stdout,
-          stderr: pending.stderr,
-          truncated: pending.truncated,
-          timeoutMs,
-        })
-        this.#destroyWorker()
-      }, timeoutMs)
 
       this.#pending = pending
+      // Posted straight away: the worker holds the request until its interpreter has loaded.
       const request: WorkerRequest = { type: 'run', runId, code }
       worker.postMessage(request)
+
+      /*
+       * The run's clock starts when Python is ready, not when Run was pressed.
+       *
+       * It used to start here regardless, so the seconds Pyodide spends loading on a cold start
+       * were charged to the learner's program — and a verification worker, which is created
+       * fresh for every check, always starts cold. A slow machine could reject a sound exercise
+       * as a timeout, or tell a learner their three-line program never finished. Starting up
+       * gets its own, longer allowance instead, and failing it is reported as the interpreter
+       * being unavailable, which is what it is.
+       */
+      // Otherwise the worker's own start-up deadline covers the wait, and 'ready' starts the clock.
+      if (this.#status === 'ready') this.#startClock(pending)
     })
+  }
+
+  #startClock(pending: PendingRun): void {
+    pending.timer = setTimeout(() => {
+      this.#finish({
+        status: 'timeout',
+        stdout: pending.stdout,
+        stderr: pending.stderr,
+        truncated: pending.truncated,
+        timeoutMs: pending.timeoutMs,
+      })
+      this.#destroyWorker()
+    }, pending.timeoutMs)
   }
 
   /** Stops a running program by terminating the worker. Safe to call when idle. */
@@ -179,6 +209,12 @@ export class PythonRunner {
 
     const worker = this.#createWorker()
     this.#setStatus('starting')
+    this.#bootTimer = setTimeout(() => {
+      this.#bootTimer = undefined
+      this.#finish({ status: 'unavailable', message: 'Python took too long to start. Try again in a moment.' })
+      this.#destroyWorker()
+      this.#setStatus('unavailable')
+    }, BOOT_TIMEOUT_MS)
     worker.addEventListener('message', (event: MessageEvent<WorkerEvent>) => {
       this.#handle(event.data)
     })
@@ -190,6 +226,8 @@ export class PythonRunner {
   }
 
   #destroyWorker(): void {
+    if (this.#bootTimer !== undefined) clearTimeout(this.#bootTimer)
+    this.#bootTimer = undefined
     this.#worker?.terminate()
     this.#worker = null
     // A terminated worker leaves no interpreter behind; the next run starts one.
@@ -199,8 +237,13 @@ export class PythonRunner {
   #handle(event: WorkerEvent): void {
     switch (event.type) {
       case 'ready': {
+        if (this.#bootTimer !== undefined) clearTimeout(this.#bootTimer)
+        this.#bootTimer = undefined
         this.#pythonVersion = event.pythonVersion
         this.#setStatus('ready')
+        // A run that was waiting for the interpreter starts its own clock now.
+        const pending = this.#pending
+        if (pending !== null && pending.timer === undefined) this.#startClock(pending)
         return
       }
       case 'output': {

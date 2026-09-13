@@ -25,14 +25,19 @@ describe('buildTestProgram', () => {
 
   it('guards every test separately, so one failure does not hide the rest', () => {
     const program = buildTestProgram('x = 1', TESTS)
-    expect(program.split('try:').length - 1).toBe(2)
+    // One guard, inside a loop over the tests: each runs, and reports, on its own.
+    expect(program).toContain('for _diagnostic_index, _diagnostic_code in enumerate(')
+    expect(program).toContain('exec(_diagnostic_code, globals())')
   })
 
-  it('indents multi-line test code into its guarded block', () => {
-    const program = buildTestProgram('x = 1', [
-      { name: 'two steps', code: 'value = add(1, 2)\nassert value == 3' },
-    ])
-    expect(program).toContain('    value = add(1, 2)\n    assert value == 3')
+  it('carries each test as data, unchanged, so a string inside a test keeps its lines', () => {
+    const multiline = 'assert longest_line("""ab\nabcd""") == "abcd"'
+    const program = buildTestProgram('x = 1', [{ name: 'multi-line string', code: multiline }])
+
+    // Not re-indented: the payload decodes to exactly the test that was written.
+    const payloadLine = program.split('\n').find((line) => line.startsWith('for _diagnostic_index')) ?? ''
+    const encoded = /loads\((".*")\)\):$/.exec(payloadLine)?.[1] ?? '""'
+    expect(JSON.parse(JSON.parse(encoded) as string)).toEqual([multiline])
   })
 
   it('catches BaseException, so a recursion or memory failure is reported not swallowed', () => {
@@ -112,6 +117,19 @@ describe('parseTestReport', () => {
     expect(report.visibleOutput).toBe('thinking...\ndone')
   })
 
+  it('reads a marker that output without a newline ran into, and keeps that output', () => {
+    // Captured from CPython for a correct function that prints with end=" " (M6 review F-01).
+    const report = parseTestReport(
+      '3 2 1 <<<diagnostic-test:pass:0>>>\n1 <<<diagnostic-test:pass:1>>>\n',
+      TESTS,
+    )
+
+    expect(report.allTestsPassed).toBe(true)
+    expect(report.incomplete).toBe(false)
+    // The report trims only the very end of the output, as it always has.
+    expect(report.visibleOutput).toBe('3 2 1 \n1')
+  })
+
   it('ignores a near-miss line rather than reading it as a result', () => {
     const report = run(['<<<diagnostic-test:pass:0>>> and more', '<<<diagnostic-test:pass:1>>>'])
 
@@ -131,9 +149,8 @@ describe('the bank’s own practical item', () => {
 
     // Not executed here — that needs a browser. What is checked is that every declared test
     // reaches the generated program exactly once, so none can be silently dropped.
-    for (const test of item.tests) {
-      expect(program).toContain(test.code)
-    }
-    expect(program.split('try:').length - 1).toBe(item.tests.length)
+    const payloadLine = program.split('\n').find((line) => line.startsWith('for _diagnostic_index')) ?? ''
+    const encoded = /loads\((".*")\)\):$/.exec(payloadLine)?.[1] ?? '""'
+    expect(JSON.parse(JSON.parse(encoded) as string)).toEqual(item.tests.map((test) => test.code))
   })
 })

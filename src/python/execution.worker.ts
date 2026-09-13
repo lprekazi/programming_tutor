@@ -114,11 +114,26 @@ self.addEventListener('message', (event: MessageEvent<unknown>) => {
 
     // A fresh namespace per run: variables defined by an earlier attempt must not
     // silently keep a later, broken attempt working.
-    const namespace = pyodide.toPy({}) as PyProxy
+    //
+    // `__name__` is set because a script run as a file has it, and without it the lookup falls
+    // through to the builtins module and reads "builtins" — so a learner's
+    // `if __name__ == "__main__":` block silently never ran (M6 review finding F-11).
+    const namespace = pyodide.toPy({ __name__: '__main__' }) as PyProxy
     try {
       await pyodide.runPythonAsync(request.code, { globals: namespace, filename: 'main.py' })
       post({ type: 'completed', runId: request.runId, durationMs: performance.now() - startedAt })
     } catch (cause: unknown) {
+      /*
+       * Only a Python exception is the program's failure. Anything else — Pyodide itself having
+       * failed and refusing further work — is the interpreter's, and reporting it as the
+       * program's would let a dead interpreter mark a learner's correct code as having crashed
+       * (M6 review finding F-15). It is reported as fatal instead, so the runner discards this
+       * worker and the next run starts a fresh one.
+       */
+      if (!(cause instanceof pyodide.ffi.PythonError)) {
+        post({ type: 'fatal', message: cause instanceof Error ? cause.message : String(cause) })
+        return
+      }
       post({
         type: 'failed',
         runId: request.runId,
