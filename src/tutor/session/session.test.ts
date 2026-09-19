@@ -30,7 +30,7 @@ function state(overrides: Partial<ConceptState> & { conceptId: ConceptState['con
 }
 
 function turn(ordinal: number, role: Turn['role'], text: string): Turn {
-  return { id: `t${String(ordinal)}`, ordinal, role, text, status: 'complete' }
+  return { id: `t${String(ordinal)}`, ordinal, role, text, status: 'complete', createdAt: 0 }
 }
 
 const STATES: readonly ConceptState[] = [

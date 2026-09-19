@@ -21,11 +21,18 @@ interface Props {
   readonly submitTestId: string
   /** The earlier step to offer a way back to, where there is one. */
   readonly back?: { readonly step: 'goal' | 'experience'; readonly label: string }
+  /**
+   * The data this page was rendered against.
+   *
+   * Sent with the answer so that a tab left open across a reset cannot write into the empty
+   * profile behind it (ADR-0034).
+   */
+  readonly generation: number
 }
 
 const START: StepResult = { status: 'idle' }
 
-export function StepForm({ action, children, submitLabel, submitTestId, back }: Props) {
+export function StepForm({ action, children, submitLabel, submitTestId, back, generation }: Props) {
   const [state, submit, pending] = useActionState(
     async (_previous: StepResult, formData: FormData) => await action(formData),
     START,
@@ -33,6 +40,7 @@ export function StepForm({ action, children, submitLabel, submitTestId, back }: 
 
   return (
     <form action={submit} className={styles.form}>
+      <input name="generation" type="hidden" value={generation} />
       {children}
 
       {state.status === 'invalid' && (
@@ -44,6 +52,13 @@ export function StepForm({ action, children, submitLabel, submitTestId, back }: 
       {state.status === 'already-done' && (
         <p className={styles.error} role="alert">
           These questions are already answered. Reload the page to carry on from where you are.
+        </p>
+      )}
+
+      {state.status === 'stale' && (
+        <p className={styles.error} data-testid="stale-tab" role="alert">
+          This page was open before the data was deleted, so nothing has been saved. Reload to
+          start again.
         </p>
       )}
 
@@ -60,7 +75,7 @@ export function StepForm({ action, children, submitLabel, submitTestId, back }: 
             data-testid="step-back"
             disabled={pending}
             formAction={async () => {
-              await goBackTo(back.step)
+              await goBackTo(back.step, generation)
             }}
             type="submit"
           >

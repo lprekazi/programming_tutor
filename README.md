@@ -5,10 +5,10 @@ its explanations, questions and practice to it.
 
 It runs locally, for one learner, with no accounts and no deployment.
 
-> **Status: early.** The foundations are in place — client-side Python execution, local
-> storage, the model-provider boundary, and the curriculum, learner model and scheduling
-> that the tutoring will be driven from. The learner-facing experience is being built
-> milestone by milestone. See [Roadmap](#roadmap).
+> **Status: usable, not finished.** The whole loop works end to end — first run, diagnostic,
+> tutoring, questions, programming exercises, spaced review, and your own data to keep or
+> delete. What remains is accessibility hardening, evaluation and optional study material.
+> See [Roadmap](#roadmap).
 
 ## Why this exists
 
@@ -87,9 +87,19 @@ Working today:
   pass its checks and the starter code must not, with one regeneration and an authored fallback
 - Misconceptions named from practical work only where both the pattern of results and the code
   itself show the belief, each rule run against a program that holds it and programs that do not
+- One recommendation on the home page — review, carry on, or something new — with the scheduler's
+  own reason behind it, and the conversations still open listed separately
+- Spaced review: a concept that comes due is opened as a review — a fresh sitting in the same
+  conversation, which starts by asking the learner to recall it rather than explaining it again,
+  and counts only once they answer
+- A record page showing every concept, its standing, and the dated answers behind it
+- Everything kept in one local SQLite file, so closing the application and coming back days
+  later resumes exactly where you were
+- Your data, on your terms: a JSON export of everything recorded about you, and a deliberate
+  delete-everything that returns the application to its first run
 
-Planned, milestone by milestone: the review and export views, accessibility hardening, evaluation,
-and optional grounding in uploaded study material.
+Planned, milestone by milestone: accessibility hardening, evaluation, and optional grounding in
+uploaded study material.
 
 ## Architecture
 
@@ -230,6 +240,17 @@ is deterministic and needs no key. Testing against the live API is a manual step
 - **Ten of 33 concepts have no authored question.** A check on one of those is generated, and a
   generated question that fails validation is not asked at all, so the tutor sometimes has
   nothing to ask.
+- **A review is offered, never insisted on, and opening one records nothing.** A review counts
+  only once an answer is marked, so a learner who opens reviews without answering them keeps
+  seeing them. It never blocks anything else: the scheduler's second choice is always offered
+  beneath it.
+- **Returning after two hours starts a new sitting.** That is what resets the question count and
+  brings a new opening from the tutor. A long break mid-lesson is treated as not having left.
+- **The export cannot be imported.** It is a portable copy of your record, not a backup: there
+  is no route back in, and deleting everything keeps nothing.
+- **Two lifecycle rules are judgements.** A conversation counts as "in the middle of" for two
+  hours and goes dormant after ten days untouched. Both affect only what is offered first,
+  never what is recorded.
 
 ## Roadmap
 
@@ -242,7 +263,7 @@ is deterministic and needs no key. Testing against the live API is a manual step
 | M4 | Home, session view, conversational tutoring ✅ |
 | M5 | Quizzes, code reading, evaluation and feedback ✅ |
 | M6 | Programming exercises, execution and progressive hints ✅ |
-| M7 | Review scheduling, persistence, reset and export |
+| M7 | Review scheduling, persistence, reset and export ✅ |
 | M8 | Accessibility, responsiveness and hardening |
 | M9 | Evaluation and documentation |
 | M10 | Optional grounding in uploaded study material |

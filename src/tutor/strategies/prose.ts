@@ -109,6 +109,14 @@ export interface ExplainInput {
   readonly depth: ExplanationDepth
   /** What specifically to address, if the caller knows. */
   readonly focus: string | null
+  /**
+   * True when the scheduler brought this concept back for review.
+   *
+   * A review that opens with the same explanation as the first lesson is a re-read, and
+   * re-reading is the thing spaced retrieval is a better use of the time than. The opening is
+   * pitched as a return: brief, and handing the work back to the learner (ADR-0032).
+   */
+  readonly review?: boolean | undefined
 }
 
 const DEPTH_INSTRUCTIONS: Readonly<Record<ExplanationDepth, string>> = {
@@ -119,6 +127,17 @@ const DEPTH_INSTRUCTIONS: Readonly<Record<ExplanationDepth, string>> = {
   deepen:
     'They mostly have this. Go to the edge case or the subtlety that separates a working understanding from a solid one.',
 }
+
+/**
+ * What changes when the sitting is a review.
+ *
+ * Appended rather than replacing the depth instruction, so a review of something shaky is
+ * still pitched at what they have shown; only the shape of the opening changes.
+ */
+const REVIEW_INSTRUCTION = `This is a REVIEW: they have met this before and it has come round
+again after a gap. Do not teach it from the beginning. Two or three sentences at most to bring
+it back to mind, and then hand it straight back to them with something to recall or work out.
+The question at the end is the point of the turn, not a postscript.`
 
 const EXPLAIN_INSTRUCTION = `TASK: explain one concept to this learner.
 
@@ -144,8 +163,11 @@ export const explainStrategy: ProseStrategy<ExplainInput> = {
     const concept = getConcept(input.conceptId)
     const focus = input.focus === null ? '' : `\n\nAddress this in particular: ${input.focus}`
 
+    const strategy = [EXPLAIN_INSTRUCTION, DEPTH_INSTRUCTIONS[input.depth]]
+    if (input.review === true) strategy.push(REVIEW_INSTRUCTION)
+
     return composePrompt({
-      strategy: `${EXPLAIN_INSTRUCTION}\n\n${DEPTH_INSTRUCTIONS[input.depth]}`,
+      strategy: strategy.join('\n\n'),
       learner: input.learner,
       task: `EXPLAIN: ${concept.id} — ${concept.title}\n${concept.summary}${focus}`,
     })

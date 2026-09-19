@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
 import { getDb } from '@/db/instance'
+import { refreshSitting } from '@/tutor/session/sitting'
+import { turnsInSitting } from '@/domain/tutoring/session'
 import { readSessionActivities } from '@/db/repositories/activity-repository'
 import { DatabaseCallLog } from '@/db/repositories/call-log-repository'
 import {
@@ -111,8 +113,13 @@ export async function askExercise(sessionId: string): Promise<ExerciseResult> {
   const db = getDb()
   const now = Date.now()
 
-  const session = readSession(db, sessionId)
-  if (session === null) return { status: 'unavailable', message: 'That session no longer exists.' }
+  const found = readSession(db, sessionId)
+  if (found === null) return { status: 'unavailable', message: 'That session no longer exists.' }
+
+  // Asking for an exercise is working in the session, so it starts a sitting where one is
+  // needed — a conversation reached by a bookmark or the Back button included (finding M5).
+  refreshSitting(db, found, now)
+  const session = readSession(db, sessionId) ?? found
 
   if (replyInProgress(session.turns) !== null) {
     return { status: 'unavailable', message: 'The tutor is still replying. Ask again once that has finished.' }
@@ -134,7 +141,8 @@ export async function askExercise(sessionId: string): Promise<ExerciseResult> {
   const decision = decideExercise({
     conceptId: session.conceptId,
     state: readConceptState(db, session.conceptId),
-    exchanges: session.turns.filter((turn) => turn.role === 'learner').length,
+    // Per sitting: a returning learner has said nothing yet in this one (finding M-3).
+    exchanges: turnsInSitting(session.turns, session.resumedAt).filter((turn) => turn.role === 'learner').length,
     exercisesThisSitting: exercises.filter(
       (exercise) => exercise.verification === 'verified' && exercise.createdAt >= session.resumedAt,
     ).length,

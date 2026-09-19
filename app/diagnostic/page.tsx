@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 
 import { getDb } from '@/db/instance'
+import { readDataGeneration } from '@/db/repositories/meta-repository'
 import { requestNow } from '@/db/request-time'
 import { decideNext, openDiagnostic } from '@/db/repositories/diagnostic-repository'
 import { ensureLearner, readProfile } from '@/db/repositories/learner-repository'
@@ -45,6 +46,7 @@ export default function DiagnosticPage() {
   if (profile === null || !profile.onboardingComplete) redirect('/welcome')
   if (profile.diagnosticComplete) redirect('/home')
 
+  const generation = readDataGeneration(db)
   const progress = openDiagnostic(db, now)
   const unmarkable = unmarkableItemIds()
   const decision = decideNext(db, progress, unmarkable)
@@ -102,6 +104,7 @@ export default function DiagnosticPage() {
         </p>
 
         <form action={finishDiagnostic}>
+          <input name="generation" type="hidden" value={generation} />
           <button className={styles.primary} data-testid="finish-diagnostic" type="submit">
             See where you are
           </button>
@@ -133,6 +136,7 @@ export default function DiagnosticPage() {
         // Remounting on the item is what resets the editor, the answer and the run output:
         // there is no state from one question that belongs in the next.
         key={item.id}
+        generation={generation}
         item={presentItem(item)}
         isLast={decision.isLast}
       />

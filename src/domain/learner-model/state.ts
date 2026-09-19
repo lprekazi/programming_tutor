@@ -155,11 +155,17 @@ export function evidenceStrengthOf(state: ConceptState): EvidenceStrength {
  * Whether this concept is due to be brought back, given the current time.
  *
  * The single definition of dueness. The scheduler calls this rather than comparing timestamps
- * of its own, so nothing can come to disagree with it about what is due — including the
- * interface, once something there shows dueness. Nothing does yet.
+ * of its own, and so does Home, so nothing can come to disagree with it about what is due.
+ *
+ * Evidence is required as well as a date. Reviewing something the learner has never attempted
+ * is not reviewing, and a stored date on an untouched concept can only be a leftover: nothing
+ * schedules one (`scheduleNextReview` returns null for `not-started`), but a reset, a restored
+ * file or a future change could leave one behind, and the word shown to the learner would then
+ * be wrong in the way that matters most — claiming they had done something they had not.
  */
 export function isReviewDue(state: ConceptState, now: number): boolean {
   if (state.nextReviewAt === null) return false
+  if (state.evidenceCount <= 0) return false
   if (!Number.isFinite(state.nextReviewAt) || !Number.isFinite(now)) return false
   return state.nextReviewAt <= now
 }

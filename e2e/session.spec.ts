@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { evidenceCount, reachHome, resetEverything, sendToTutor, startTutoring } from './helpers'
 
@@ -26,7 +26,7 @@ test.describe('a tutoring session', () => {
     // Home offers one thing to do, with the scheduler's reason beside it.
     await expect(page.getByTestId('next-concept')).not.toBeEmpty()
     await expect(page.getByTestId('next-reason')).not.toBeEmpty()
-    await expect(page.getByTestId('start-session')).toHaveText('Start learning')
+    await expectLabelMatchesKind(page)
 
     await startTutoring(page)
 
@@ -190,11 +190,12 @@ test.describe('a tutoring session', () => {
   test('talking to the tutor does not change what the tutor claims they know', async ({ page }) => {
     const before = await evidenceCount(page)
 
-    await page.goto('/home')
+    await page.goto('/concepts')
     const bandsBefore = await page.locator('[data-band]').evaluateAll((nodes) =>
       nodes.map((node) => `${node.getAttribute('data-testid') ?? ''}:${node.getAttribute('data-band') ?? ''}`),
     )
 
+    await page.goto('/home')
     await page.getByTestId('start-session').click()
     await expect(page.getByTestId('turn-0')).toBeVisible()
     await sendToTutor(page, 'That makes sense now, I completely understand it.')
@@ -202,7 +203,7 @@ test.describe('a tutoring session', () => {
 
     expect(await evidenceCount(page)).toBe(before)
 
-    await page.goto('/home')
+    await page.goto('/concepts')
     const bandsAfter = await page.locator('[data-band]').evaluateAll((nodes) =>
       nodes.map((node) => `${node.getAttribute('data-testid') ?? ''}:${node.getAttribute('data-band') ?? ''}`),
     )
@@ -225,7 +226,9 @@ test.describe('a tutoring session', () => {
 
     await page.getByTestId('finish-session').click()
     await expect(page).toHaveURL(/\/home$/)
-    await expect(page.getByTestId('start-session')).toHaveText('Start learning')
+    // Not "Continue": the conversation they just finished is no longer what Home presses.
+    await expect(page.getByTestId('start-session')).not.toHaveText('Continue')
+    await expectLabelMatchesKind(page)
   })
 })
 
@@ -257,8 +260,11 @@ test.describe('why this concept', () => {
      * learner has made a start on, and vice versa.
      */
     const conceptId = await page.getByTestId('next-concept').getAttribute('data-concept')
-    const band = await page.getByTestId(`band-${conceptId ?? ''}`).innerText()
     const text = await grounds.innerText()
+
+    // The standing itself lives on the record page, which is where it is read from.
+    await page.goto('/concepts')
+    const band = await page.getByTestId(`band-${conceptId ?? ''}`).innerText()
 
     if (band === 'Not started') {
       expect(text, band).toContain('You have not worked on this yet.')
@@ -277,3 +283,29 @@ test.describe('why this concept', () => {
     expect(text).not.toMatch(/0\.\d/)
   })
 })
+
+/**
+ * The button says what the eyebrow above it says.
+ *
+ * Asserted as a correspondence rather than a fixed string, because which branch the scheduler
+ * takes depends on the learner's answers — and the defect worth catching is not "the wrong
+ * word" but the label and the reason describing different actions.
+ */
+async function expectLabelMatchesKind(page: Page): Promise<void> {
+  const labels: Readonly<Record<string, string>> = {
+    'Due for review': 'Start the review',
+    'Still going': 'Continue',
+    'Left open': 'Pick it up again',
+    'Finished earlier': 'Go back to it',
+    'Worth another go': 'Work on this',
+    New: 'Start learning',
+  }
+
+  // `textContent`, not `innerText`: the eyebrow is upper-cased by CSS, and `innerText` returns
+  // what is painted rather than what is written.
+  const kind = ((await page.getByTestId('next-kind').textContent()) ?? '').trim()
+  const expected = labels[kind]
+
+  expect(expected, `unknown kind on Home: ${kind}`).toBeDefined()
+  await expect(page.getByTestId('start-session')).toHaveText(expected ?? '')
+}

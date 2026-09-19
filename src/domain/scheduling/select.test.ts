@@ -252,7 +252,7 @@ describe('the explanation shown to the learner', () => {
     expect(sentence).toContain('3 days ago')
   })
 
-  it('says "earlier today" rather than "0 days ago"', () => {
+  it('says "less than a day ago" rather than "0 days ago", and makes no calendar claim', () => {
     const selection = selectNextConcept(
       lookupFor([
         ...unlock('while-loops'),
@@ -260,7 +260,7 @@ describe('the explanation shown to the learner', () => {
       ]),
       NOW,
     )
-    expect(describeSelection(selection!)).toContain('earlier today')
+    expect(describeSelection(selection!)).toContain('less than a day ago')
   })
 
   it('produces a sentence for every kind of reason, with no leftover placeholders', () => {
@@ -403,7 +403,7 @@ describe('the grounds behind a recommendation', () => {
     ])
     const selection = selectNextConcept(lookup, NOW)
 
-    expect(groundsFor(selection!, lookup)).toContain('It was due to be revisited today.')
+    expect(groundsFor(selection!, lookup)).toContain('It was due to be revisited less than a day ago.')
   })
 
   it('says a concept is the weakest available when that is why', () => {

@@ -43,6 +43,13 @@
       "when": 1789291719008,
       "tag": "0005_programming_exercises",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789822688968,
+      "tag": "0006_lifecycle_and_export",
+      "breakpoints": true
     }
   ]
 }

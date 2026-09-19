@@ -38,7 +38,18 @@ export interface SessionRecord {
   /** When this sitting began. Advances every time the session is reopened. */
   readonly resumedAt: number
   readonly closedAt: number | null
+  /** What this sitting is for. Set from the scheduler's reason, never by a model. */
+  readonly mode: SessionMode
+  /** Why the learner is here now, where this is not the first sitting. */
+  readonly resumedReason: string | null
   readonly turns: readonly Turn[]
+}
+
+/** Ordinary teaching, or revisiting something the scheduler brought back. */
+export type SessionMode = 'teach' | 'review'
+
+function toMode(value: string): SessionMode {
+  return value === 'review' ? 'review' : 'teach'
 }
 
 function readTurns(db: Db, sessionId: string): readonly Turn[] {
@@ -54,6 +65,7 @@ function readTurns(db: Db, sessionId: string): readonly Turn[] {
       role: row.role === 'tutor' ? 'tutor' : row.role === 'activity' ? 'activity' : 'learner',
       text: row.text,
       status: row.status as TurnStatus,
+      createdAt: row.createdAt.getTime(),
     }))
 }
 
@@ -69,6 +81,8 @@ function hydrate(
     updatedAt: row.updatedAt.getTime(),
     resumedAt: row.resumedAt.getTime(),
     closedAt: row.closedAt?.getTime() ?? null,
+    mode: toMode(row.mode),
+    resumedReason: row.resumedReason,
     turns: readTurns(db, row.id),
   }
 }
@@ -85,6 +99,7 @@ export function openSession(
   conceptId: ConceptId,
   reason: string,
   at: number,
+  mode: SessionMode = 'teach',
 ): SessionRecord {
   db.insert(tutoringSession)
     .values({
@@ -95,6 +110,7 @@ export function openSession(
       startedAt: new Date(at),
       updatedAt: new Date(at),
       resumedAt: new Date(at),
+      mode,
     })
     .onConflictDoNothing({ target: [tutoringSession.learnerId, tutoringSession.conceptId] })
     .run()
@@ -158,6 +174,17 @@ export function readSessionForConcept(db: Db, conceptId: ConceptId): SessionReco
   return row === undefined ? null : hydrate(db, row)
 }
 
+/** Every session the learner has, newest activity first. What Home and the export read. */
+export function readAllSessions(db: Db): readonly SessionRecord[] {
+  return db
+    .select()
+    .from(tutoringSession)
+    .where(eq(tutoringSession.learnerId, LEARNER_ID))
+    .orderBy(desc(tutoringSession.updatedAt))
+    .all()
+    .map((row) => hydrate(db, row))
+}
+
 /** Concepts with a conversation still open, so Home can say "Continue" rather than "Start". */
 export function readOpenSessionConcepts(db: Db): readonly ConceptId[] {
   return db
@@ -193,12 +220,29 @@ export function reserveTutorTurn(
   sessionId: string,
   provenance: { readonly strategyId: string; readonly strategyVersion: string; readonly model: string },
   at: number,
+  /**
+   * Which trailing tutor turn may be taken over rather than appended after.
+   *
+   *  - `retry` (the default): any unfinished one. A retry is the learner asking for that reply
+   *    again, so a failed or stopped attempt is replaced — which is the one sanctioned way a
+   *    cancellation is ever reopened (see `finishTutorTurn`).
+   *  - `untouched`: only one nobody has started. A new sitting uses this. Taking over a stopped
+   *    reply there erased the half the learner had read, from the transcript and the export,
+   *    when nobody had asked for it again (M7 review finding M-1).
+   */
+  options: { readonly reuse: 'retry' | 'untouched' } = { reuse: 'retry' },
 ): PendingTurn {
   const turns = readTurns(db, sessionId)
   const last = turns.at(-1)
 
+  const reusable =
+    last?.role === 'tutor' &&
+    (options.reuse === 'retry'
+      ? last.status !== 'complete'
+      : last.status === 'pending' && last.text.length === 0)
+
   // A tutor turn that is still unfinished is the one to retry, not a reason to open another.
-  if (last?.role === 'tutor' && last.status !== 'complete') {
+  if (last !== undefined && reusable) {
     db.update(sessionTurn)
       .set({ status: 'pending', text: '', updatedAt: new Date(at), ...provenance })
       .where(eq(sessionTurn.id, last.id))
@@ -324,7 +368,7 @@ export function appendLearnerTurn(
   if (inserted[0]?.id !== id) return { stored: false }
 
   touch(db, sessionId, at)
-  return { stored: true, turn: { id, ordinal, role: 'learner', text, status: 'complete' } }
+  return { stored: true, turn: { id, ordinal, role: 'learner', text, status: 'complete', createdAt: at } }
 }
 
 /** Marks a tutor turn as being streamed right now, so a reload does not start a second one. */
@@ -398,11 +442,47 @@ export function closeSession(db: Db, sessionId: string, at: number): void {
     .run()
 }
 
-/** Reopens a closed session so the learner can carry on where they were. Idempotent. */
-export function reopenSession(db: Db, sessionId: string, at: number): void {
+/**
+ * Reopens a closed session so the learner can carry on where they were. Idempotent.
+ *
+ * The sitting's mode and reason are set here rather than at `openSession`, because the same
+ * conversation is taught first and reviewed weeks later: `openedReason` records why it began,
+ * and these record why the learner is here today. Both come from the scheduler.
+ */
+export function reopenSession(
+  db: Db,
+  sessionId: string,
+  at: number,
+  sitting: { readonly mode: SessionMode; readonly reason: string } = { mode: 'teach', reason: '' },
+): void {
   db.update(tutoringSession)
     // A new sitting, so anything counted per sitting starts again from here.
-    .set({ closedAt: null, updatedAt: new Date(at), resumedAt: new Date(at) })
+    .set({
+      closedAt: null,
+      updatedAt: new Date(at),
+      resumedAt: new Date(at),
+      mode: sitting.mode,
+      resumedReason: sitting.reason.length > 0 ? sitting.reason : null,
+    })
+    .where(eq(tutoringSession.id, sessionId))
+    .run()
+}
+
+/**
+ * Records what this sitting is for, without starting a new one.
+ *
+ * Separate from `reopenSession` because the two answer different questions. Opening a session
+ * from Home always brings today's decision with it — the button said "Start the review", so the
+ * sitting is a review — but pressing it again ten minutes later is the same sitting, and must
+ * not reset what is counted per sitting.
+ */
+export function setSittingPurpose(
+  db: Db,
+  sessionId: string,
+  sitting: { readonly mode: SessionMode; readonly reason: string },
+): void {
+  db.update(tutoringSession)
+    .set({ mode: sitting.mode, resumedReason: sitting.reason.length > 0 ? sitting.reason : null })
     .where(eq(tutoringSession.id, sessionId))
     .run()
 }

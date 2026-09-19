@@ -4,6 +4,7 @@ import { OFFLINE_BASE_URL } from '../playwright.config'
 import { PRACTICE_ITEMS_BY_ID } from '../src/domain/assessment/items'
 
 import {
+  answerCheckCorrectly as answerCorrectly,
   answerCurrent,
   completeOnboarding,
   currentItemId,
@@ -36,41 +37,6 @@ async function reachCheck(page: Page): Promise<void> {
 
   await page.getByTestId('ask-check').click()
   await expect(page.getByTestId('check')).toBeVisible()
-}
-
-/** The correct answer for whatever check is on screen, read from the bank. */
-async function answerCorrectly(page: Page): Promise<void> {
-  const check = page.getByTestId('check').last()
-  const options = await check.getByTestId(/^check-option-/).count()
-
-  if (options > 0) {
-    const labels = await check.locator('label').allInnerTexts()
-    const item = [...PRACTICE_ITEMS_BY_ID.values()].find(
-      (candidate) =>
-        candidate.kind === 'choice' &&
-        candidate.options.every((option) => labels.some((label) => label.includes(option))),
-    )
-    if (item === undefined || item.kind !== 'choice') throw new Error('unrecognised question')
-
-    // The options were shuffled when the question was asked, so the right one is found by its
-    // text rather than by the index the bank happens to store.
-    const correct = item.options[item.correctIndex] ?? ''
-    const index = labels.findIndex((label) => label.includes(correct))
-    await check.getByTestId(`check-option-${String(index)}`).check()
-  } else {
-    const prompt = await check.getByTestId('check-prompt').innerText()
-    const code = await check.getByTestId('check-code').innerText()
-    const item = [...PRACTICE_ITEMS_BY_ID.values()].find(
-      (candidate) => candidate.prompt === prompt && (candidate.code ?? '') === code,
-    )
-    if (item === undefined || item.kind !== 'predict-output') throw new Error('unrecognised question')
-    await check.getByTestId('check-input').fill(item.expectedOutput)
-  }
-
-  await check.getByTestId('check-submit').click()
-  // The region itself is always in the document — a live region has to be, or its first
-  // message is not announced — so the heading is what says an answer has been marked.
-  await expect(check.getByTestId('check-verdict-heading')).toBeVisible()
 }
 
 /** Asks for a check and returns the one that arrives, so several can be answered in a row. */
@@ -344,7 +310,7 @@ test.describe('checking understanding', () => {
   test('the profile shows what the answer did, with its reason', async ({ page }) => {
     await reachCheck(page)
     await answerCorrectly(page)
-    await page.goto('/home')
+    await page.goto('/concepts')
 
     // At least one concept now has a dated evidence entry with the domain's own reason.
     const disclosure = page.getByTestId(/^history-/).first()
@@ -473,7 +439,7 @@ test.describe('a check that cannot be marked', () => {
     // Counted after the multiple choice, so what follows is measured against the written
     // answer alone.
     const before = await evidenceCount(page)
-    await page.goto('/home')
+    await page.goto('/concepts')
     const bandsBefore = await page
       .locator('[data-band]')
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-band')))
@@ -493,7 +459,7 @@ test.describe('a check that cannot be marked', () => {
 
     expect(await evidenceCount(page)).toBe(before)
 
-    await page.goto('/home')
+    await page.goto('/concepts')
     const bandsAfter = await page
       .locator('[data-band]')
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-band')))

@@ -14,6 +14,7 @@ import {
   recordObservation,
 } from '@/db/repositories/session-repository'
 import { isConceptId } from '@/domain/curriculum/graph'
+import { turnsInSitting } from '@/domain/tutoring/session'
 import { resolveProvider } from '@/llm/resolve'
 import { sessionObserveStrategy } from '@/tutor/strategies/session'
 import { prepareTurn, runLoggedStructured, streamTurn } from '@/tutor/session/tutor'
@@ -78,12 +79,20 @@ export async function POST(
 
   const profile = readProfile(db)
 
-  // The learner's message is the turn immediately before this one, where there is one. An
-  // opening turn has nothing before it, which is what tells `prepareTurn` to explain rather
-  // than converse.
+  /*
+   * The learner's message is the turn immediately before this one, where there is one.
+   *
+   * A turn that opens a *sitting* has no message of its own, which is what tells `prepareTurn`
+   * to explain rather than converse. That is not only the first turn of the conversation: a
+   * learner returning weeks later gets a new opening turn, and reading the message from the
+   * previous sitting would have the tutor reply to something said three weeks ago — and would
+   * skip the explain path, which is the only one that is told this is a review (finding H1).
+   */
   const previous = session.turns.filter((candidate) => candidate.ordinal < turn.ordinal)
-  const lastLearnerTurn = [...previous].reverse().find((candidate) => candidate.role === 'learner')
-  const message = turn.ordinal === 0 ? null : (lastLearnerTurn?.text ?? null)
+  const thisSitting = turnsInSitting(previous, session.resumedAt)
+  const opensSitting = turn.ordinal === 0 || thisSitting.every((candidate) => candidate.role !== 'learner')
+  const lastLearnerTurn = [...thisSitting].reverse().find((candidate) => candidate.role === 'learner')
+  const message = opensSitting ? null : (lastLearnerTurn?.text ?? null)
 
   const prepared = prepareTurn({
     conceptId: session.conceptId,
@@ -93,6 +102,8 @@ export async function POST(
     // The turn being written is excluded: it is empty, and a pending turn is not context.
     turns: previous,
     message,
+    // Only the opening turn of a review reads this; the conversation after it is ordinary.
+    review: session.mode === 'review',
   })
 
   const controller = new AbortController()

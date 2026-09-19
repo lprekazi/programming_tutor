@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { getConcept } from '../curriculum/graph'
 import { initialConceptState, type ConceptState } from '../learner-model/state'
 import { MAX_CHECKS_PER_SESSION, decideCheck, describeGround, type CheckContext } from './select'
 
@@ -92,6 +93,50 @@ describe('holding off', () => {
     )
 
     expect(decision.kind).not.toBe('hold')
+  })
+})
+
+/*
+ * A review sitting asks first and teaches afterwards, so two of the holds do not apply to it.
+ * Which two, and which still do, is the whole of the rule (ADR-0032).
+ */
+describe('a sitting opened as a review', () => {
+  it('asks straight away rather than waiting for some teaching first', () => {
+    const decision = decideCheck(contextWith({ exchanges: 0, review: true }))
+
+    expect(decision.kind).not.toBe('hold')
+  })
+
+  it('asks a learner who is demonstrably solid, because that is what being due means', () => {
+    const solid = stateWith({
+      theta: getConcept('loop-control').baselineDifficulty + 1.6,
+      uncertainty: 0.3,
+      evidenceCount: 8,
+      successes: 7,
+      unaidedSuccesses: 5,
+    })
+
+    expect(decideCheck(contextWith({ state: solid })).kind).toBe('hold')
+    expect(decideCheck(contextWith({ state: solid, review: true })).kind).not.toBe('hold')
+  })
+
+  it('still will not ask twice in a row, or past the limit for one sitting', () => {
+    expect(decideCheck(contextWith({ review: true, lastWasCheck: true }))).toMatchObject({
+      kind: 'hold',
+      because: 'just-asked',
+    })
+    expect(decideCheck(contextWith({ review: true, checksSoFar: MAX_CHECKS_PER_SESSION }))).toMatchObject({
+      kind: 'hold',
+      because: 'enough-for-now',
+    })
+  })
+
+  it('records the reason the learner is actually here, and says it in the ground', () => {
+    const decision = decideCheck(contextWith({ exchanges: 0, review: true }))
+
+    if (decision.kind === 'hold') throw new Error('expected a question')
+    expect(decision.ground.kind).toBe('due-review')
+    expect(describeGround(decision.ground)).toContain('review')
   })
 })
 

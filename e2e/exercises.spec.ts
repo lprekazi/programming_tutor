@@ -209,7 +209,7 @@ test.describe('a programming exercise', () => {
 
     // Evidence: one failure, attributed to the exercise.
     await page.goto(session)
-    await page.goto('/home')
+    await page.goto('/concepts')
     await page.getByTestId('history-while-loops').click()
     await expect(page.getByTestId('evidence-while-loops')).toContainText('Did not yet solve an exercise')
   })
@@ -246,7 +246,7 @@ test.describe('a programming exercise', () => {
     await expect(exercise(page).getByTestId('exercise-attribution')).toContainText('never against you')
 
     await page.goto(session)
-    await page.goto('/home')
+    await page.goto('/concepts')
     await page.getByTestId('history-while-loops').click()
     // The domain's own reason, stating the support that was actually taken.
     await expect(page.getByTestId('evidence-while-loops')).toContainText('Solved an exercise on repeating while something is true after 2 hints')

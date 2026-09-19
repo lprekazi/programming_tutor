@@ -48,9 +48,13 @@ test.describe('first run', () => {
     await page.getByTestId('finish-diagnostic').click()
 
     await expect(page).toHaveURL(/\/home$/)
-    await expect(page.getByTestId('learner-goal')).toContainText('Read my team')
     await expect(page.getByTestId('next-concept')).not.toBeEmpty()
     await expect(page.getByTestId('next-reason')).not.toBeEmpty()
+
+    // The goal, and the concept-by-concept record, live one click away.
+    await page.getByTestId('see-concepts').click()
+    await expect(page).toHaveURL(/\/concepts$/)
+    await expect(page.getByTestId('learner-goal')).toContainText('Read my team')
 
     // Going back to the root now lands on the profile, not on onboarding.
     await page.goto('/')
@@ -86,6 +90,7 @@ test.describe('first run', () => {
     await completeDiagnostic(page, false)
     await page.getByTestId('finish-diagnostic').click()
     await expect(page).toHaveURL(/\/home$/)
+    await page.goto('/concepts')
 
     const bands = page.locator('[data-band]')
     await expect(bands.first()).toBeVisible()

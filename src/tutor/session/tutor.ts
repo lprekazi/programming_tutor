@@ -35,6 +35,8 @@ export interface TurnRequest {
   readonly turns: readonly Turn[]
   /** What the learner has just written, or null when this is the opening turn. */
   readonly message: string | null
+  /** True when this sitting was opened as a review. Changes only the opening turn. */
+  readonly review?: boolean | undefined
 }
 
 export interface PreparedTurn {
@@ -61,6 +63,7 @@ export function prepareTurn(request: TurnRequest): PreparedTurn {
         conceptId: request.conceptId,
         depth: focus?.pitch ?? 'introduce',
         focus: focus === null ? null : openingFocus(focus),
+        review: request.review === true,
       }),
       strategyId: explainStrategy.id,
       strategyVersion: explainStrategy.version,

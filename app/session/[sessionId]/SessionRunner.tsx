@@ -11,7 +11,14 @@ import { verifyGeneratedExercise } from '@/python/verification'
 import { FAILURE_MARKER } from '@/tutor/session/stream-protocol'
 import { TutorProse } from '@/ui/components/TutorProse'
 
-import { askCheck, cancelTutorTurn, finishSession, retryTutorTurn, sendMessage } from '../../actions'
+import {
+  askCheck,
+  cancelTutorTurn,
+  finishSession,
+  resumeSitting,
+  retryTutorTurn,
+  sendMessage,
+} from '../../actions'
 import { askExercise, recordExerciseVerification, type ExerciseResult } from '../../exercise-actions'
 import { Check, type AnsweredView } from './Check'
 import { Exercise } from './Exercise'
@@ -56,7 +63,38 @@ interface Props {
   readonly exercises: readonly ExerciseSlot[]
   /** True when a generated exercise was left waiting for verification, so it can be resumed. */
   readonly exercisePending: boolean
+  /**
+   * True when the scheduler opened this sitting as a review.
+   *
+   * It changes what is offered first, and nothing else. A review is the same tutoring flow —
+   * the same questions, exercises and conversation — led by recalling the thing rather than by
+   * reading about it again, which is what makes a revisit worth more than a re-read
+   * (ADR-0032).
+   */
+  readonly review: boolean
+  /**
+   * True when a question has already been asked in *this* sitting.
+   *
+   * Counted per sitting, not per session. Counted over the conversation, a review of something
+   * the learner had been checked on months earlier never led with recall at all, which is the
+   * thing a review is (M7 review finding H1).
+   */
+  readonly recallAsked: boolean
+  /**
+   * True when this conversation was reached after its sitting lapsed — by a bookmark, the "still
+   * open" list or the Back button — rather than through Home's button.
+   *
+   * The sitting is started from here, once the page is actually on screen, because a server
+   * render must not write: a prefetch would start sittings nobody asked for (finding H-2).
+   */
+  readonly resume: boolean
 }
+
+/** What the check button says. In a review it is the first thing to do, and leads. */
+const CHECK_LABEL = {
+  review: 'Start by recalling it',
+  ordinary: 'Check my understanding',
+} as const
 
 /** Why an exercise is not being set right now. Each is the selector's real reason. */
 const EXERCISE_HOLD_WORDS: Readonly<Record<ExerciseHold, string>> = {
@@ -96,7 +134,17 @@ const HOLD_WORDS: Readonly<Record<string, string>> = {
     'You are solid on this one, with enough behind it that another question would not tell either of us anything new.',
 }
 
-export function SessionRunner({ sessionId, conceptTitle, turns, checks, exercises, exercisePending }: Props) {
+export function SessionRunner({
+  sessionId,
+  conceptTitle,
+  turns,
+  checks,
+  exercises,
+  exercisePending,
+  review,
+  recallAsked,
+  resume,
+}: Props) {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   /** Text arriving right now, for the turn named in `phase`. Never the whole conversation. */
@@ -122,6 +170,28 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks, exercise
   const checkFor = (turnId: string): CheckSlot | undefined =>
     checks.find((slot) => slot.turnId === turnId)
 
+  /*
+   * A conversation reached after its sitting lapsed starts the sitting once, here.
+   *
+   * Idempotent on the server — within a sitting `resumeSitting` does nothing — and guarded here
+   * so one mount asks once. The refresh brings the new opening turn, which the effect below
+   * streams like any other.
+   */
+  const sittingResumedRef = useRef(false)
+  useEffect(() => {
+    if (!resume || sittingResumedRef.current) return
+    sittingResumedRef.current = true
+
+    void resumeSitting(sessionId)
+      .then(() => {
+        router.refresh()
+      })
+      .catch(() => {
+        // Nothing to undo: the conversation is shown as it was, and writing in it starts the
+        // sitting anyway.
+      })
+  }, [resume, router, sessionId])
+
   /** A check that has been asked and not yet answered. The learner owes it an answer. */
   const openCheck = checks.find((slot) => slot.answered === null)
 
@@ -130,6 +200,13 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks, exercise
 
   /** An exercise on the page with nothing submitted yet. */
   const openExercise = exercises.find((slot) => slot.view.submissions.length === 0)
+
+  /*
+   * In a review, recalling the thing comes before reading about it again, so the question is
+   * the leading action until one has been asked. Afterwards the sitting is an ordinary
+   * conversation and the controls read as they always do.
+   */
+  const leadWithRecall = review && !recallAsked
 
   /**
    * The tutor turn the page is currently working on, finished or not.
@@ -513,13 +590,13 @@ export function SessionRunner({ sessionId, conceptTitle, turns, checks, exercise
            * a test.
            */
           <button
-            className={styles.secondary}
+            className={leadWithRecall ? styles.primary : styles.secondary}
             data-testid="ask-check"
             disabled={busy}
             onClick={check}
             type="button"
           >
-            Check my understanding
+            {leadWithRecall ? CHECK_LABEL.review : CHECK_LABEL.ordinary}
           </button>
         )}
         {!streaming && openCheck === undefined && openExercise === undefined && (

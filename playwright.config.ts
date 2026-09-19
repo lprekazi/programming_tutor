@@ -29,6 +29,18 @@ export const PACED_BASE_URL = `http://localhost:${String(PACED_PORT)}`
 const FLAKY_PORT = 3103
 export const FLAKY_BASE_URL = `http://localhost:${String(FLAKY_PORT)}`
 
+/*
+ * Where the durability test starts its own second application process.
+ *
+ * Playwright cannot restart the server it manages, so one test starts another instance of the
+ * same build over the same database file, asks it what the learner did, and stops it again.
+ * Deliberately **not** a `webServer` entry: a fifth server running for the whole suite competed
+ * with the four that are actually being tested, and two idle processes on one SQLite file made
+ * the Pyodide-heavy scenarios time out (M7 defect D-037).
+ */
+export const RESTARTED_PORT = 3104
+export const RESTARTED_BASE_URL = `http://localhost:${String(RESTARTED_PORT)}`
+
 export default defineConfig({
   testDir: './e2e',
   // Pyodide loads ~13 MB on the first run in a fresh browser profile.

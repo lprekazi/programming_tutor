@@ -113,14 +113,24 @@ describe('evidence strength', () => {
 })
 
 describe('review due', () => {
+  /** Scheduled, and with an answer behind it: both are required for a concept to be due. */
+  function scheduled(at: number): ConceptState {
+    return stateWith({ nextReviewAt: at, evidenceCount: 2, successes: 1 })
+  }
+
   it('is never due when nothing has been scheduled', () => {
     expect(isReviewDue(stateWith({ nextReviewAt: null }), 1_000)).toBe(false)
   })
 
   it('becomes due once the scheduled time has passed', () => {
-    expect(isReviewDue(stateWith({ nextReviewAt: 1_000 }), 999)).toBe(false)
-    expect(isReviewDue(stateWith({ nextReviewAt: 1_000 }), 1_000)).toBe(true)
-    expect(isReviewDue(stateWith({ nextReviewAt: 1_000 }), 5_000)).toBe(true)
+    expect(isReviewDue(scheduled(1_000), 999)).toBe(false)
+    expect(isReviewDue(scheduled(1_000), 1_000)).toBe(true)
+    expect(isReviewDue(scheduled(1_000), 5_000)).toBe(true)
+  })
+
+  it('is never due for a concept the learner has never attempted', () => {
+    // Nothing schedules one, so this is a leftover date rather than a review.
+    expect(isReviewDue(stateWith({ nextReviewAt: 1_000 }), 5_000)).toBe(false)
   })
 
   it('is separate from mastery, so a secure concept can still be due', () => {

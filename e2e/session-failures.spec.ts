@@ -203,7 +203,7 @@ test.describe('with no tutor configured', () => {
     const count = Number(await page.getByTestId('evidence-count').innerText())
     expect(count).toBeGreaterThan(0)
 
-    await page.goto('/home')
+    await page.goto('/concepts')
     await expect(page.locator('[data-band="secure"]')).toHaveCount(0)
   })
 })

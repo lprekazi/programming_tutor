@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import { getConcept } from '../curriculum/graph'
+import type { ConceptId } from '../curriculum/types'
 import {
   MILLISECONDS_PER_DAY,
   REVIEW_INTERVAL_DAYS,
   REVIEW_MAX_DAYS,
 } from '../learner-model/parameters'
-import { bandOf, initialConceptState, type ConceptState } from '../learner-model/state'
+import { deriveEvidence } from '../evidence/derive'
+import { bandOf, initialConceptState, isReviewDue, type ConceptState } from '../learner-model/state'
 import { overdueBy, scheduleNextReview } from './review'
 
 const NOW = Date.parse('2026-09-10T12:00:00.000Z')
@@ -164,8 +166,13 @@ describe('overdue', () => {
   })
 
   it('grows with time past the scheduled point', () => {
-    const state = stateWith({ nextReviewAt: NOW - 2 * MILLISECONDS_PER_DAY })
+    // Evidence as well as a date: a concept nobody has attempted is not overdue (`isReviewDue`).
+    const state = stateWith({ nextReviewAt: NOW - 2 * MILLISECONDS_PER_DAY, evidenceCount: 2, successes: 1 })
     expect(overdueBy(state, NOW)).toBe(2 * MILLISECONDS_PER_DAY)
+  })
+
+  it('is zero for a concept with a date but no evidence behind it', () => {
+    expect(overdueBy(stateWith({ nextReviewAt: NOW - MILLISECONDS_PER_DAY }), NOW)).toBe(0)
   })
 
   it('treats a concept due at exactly this instant as due', () => {
@@ -173,5 +180,68 @@ describe('overdue', () => {
     // showed "due now" while the scheduler skipped it and started new material instead.
     expect(overdueBy(stateWith({ nextReviewAt: NOW }), NOW)).toBe(0)
     expect(scheduleNextReview(stateWith({ nextReviewAt: NOW }), NOW)).toBeNull()
+  })
+})
+
+/*
+ * What a review is for, in scheduling terms: it is completed by an answer, and completing it
+ * pushes the concept further out than it was. Both halves matter — without the first, opening a
+ * session would silently count as revision; without the second, a settled concept would come
+ * back at the same interval for ever.
+ */
+describe('completing a review', () => {
+  const due: ConceptState = {
+    ...initialConceptState(CONCEPT),
+    theta: DIFFICULTY + 1.2,
+    uncertainty: 0.35,
+    evidenceCount: 5,
+    successes: 4,
+    unaidedSuccesses: 3,
+    nextReviewAt: NOW - 3 * MILLISECONDS_PER_DAY,
+  }
+
+  it('is an answer, not an opening: nothing changes until something is attempted', () => {
+    expect(isReviewDue(due, NOW)).toBe(true)
+    // No attempt, no derivation: the state is the same object it was.
+    expect(due.nextReviewAt).toBe(NOW - 3 * MILLISECONDS_PER_DAY)
+  })
+
+  it('schedules the next one further out than the gap that has just elapsed', () => {
+    const derived = deriveEvidence(due, {
+      attemptId: 'review-1',
+      conceptId: CONCEPT,
+      itemId: 'p-while-accumulate',
+      itemDifficulty: DIFFICULTY,
+      correct: true,
+      hintDepth: 0,
+      misconceptions: [],
+      observedAt: NOW,
+    })
+
+    const next = derived.nextState.nextReviewAt
+    expect(next).not.toBeNull()
+    expect(next!).toBeGreaterThan(NOW)
+    // Further out than it was last time round, which is what spaced retrieval prescribes.
+    expect(next! - NOW).toBeGreaterThan(3 * MILLISECONDS_PER_DAY)
+    expect(isReviewDue(derived.nextState, NOW)).toBe(false)
+  })
+
+  it('brings a concept answered wrongly back sooner than one answered correctly', () => {
+    const attempt = {
+      attemptId: 'review-2',
+      conceptId: CONCEPT as ConceptId,
+      itemId: 'p-while-accumulate',
+      itemDifficulty: DIFFICULTY,
+      hintDepth: 0,
+      misconceptions: [],
+      observedAt: NOW,
+    }
+
+    const right = deriveEvidence(due, { ...attempt, correct: true }).nextState.nextReviewAt
+    const wrong = deriveEvidence(due, { ...attempt, correct: false }).nextState.nextReviewAt
+
+    expect(wrong).not.toBeNull()
+    expect(right).not.toBeNull()
+    expect(wrong!).toBeLessThan(right!)
   })
 })

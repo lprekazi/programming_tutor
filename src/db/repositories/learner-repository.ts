@@ -430,7 +430,35 @@ export function countEvidence(db: Db): number {
   return db.select().from(evidenceTable).where(eq(evidenceTable.learnerId, LEARNER_ID)).all().length
 }
 
-/** Wipes everything and returns to first run. */
+/**
+ * Every piece of evidence, newest first. The export's record of how each band was reached.
+ */
+export function readAllEvidence(db: Db) {
+  return db
+    .select()
+    .from(evidenceTable)
+    .where(eq(evidenceTable.learnerId, LEARNER_ID))
+    .all()
+    .sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime())
+}
+
+/** Every misconception ever observed, newest first, with the concept it was seen on. */
+export function readMisconceptionObservations(db: Db) {
+  return db
+    .select()
+    .from(misconceptionObservation)
+    .where(eq(misconceptionObservation.learnerId, LEARNER_ID))
+    .all()
+    .sort((a, b) => b.observedAt.getTime() - a.observedAt.getTime())
+}
+
+/**
+ * Wipes everything and returns to first run.
+ *
+ * Kept for callers that only need the deletion. The learner-facing reset goes through
+ * `resetEverything` in the meta repository, which also advances the data generation so a tab
+ * open at the time cannot write into the fresh profile.
+ */
 export function resetLearner(db: Db): void {
   db.delete(learner).where(eq(learner.id, LEARNER_ID)).run()
 }

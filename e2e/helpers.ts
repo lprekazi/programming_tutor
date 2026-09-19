@@ -1,5 +1,7 @@
 import { expect, type Page } from '@playwright/test'
 
+import { PRACTICE_ITEMS_BY_ID } from '../src/domain/assessment/items'
+
 import { DIAGNOSTIC_ITEMS_BY_ID } from '../src/domain/diagnostic/items'
 import { RESET_CONFIRMATION } from '../app/reset/confirmation'
 
@@ -196,4 +198,39 @@ export async function sendToTutor(page: Page, text: string): Promise<void> {
 export async function evidenceCount(page: Page): Promise<number> {
   await page.goto('/reset')
   return Number(await page.getByTestId('evidence-count').innerText())
+}
+
+/** The correct answer for whatever check is on screen, read from the bank. */
+export async function answerCheckCorrectly(page: Page): Promise<void> {
+  const check = page.getByTestId('check').last()
+  const options = await check.getByTestId(/^check-option-/).count()
+
+  if (options > 0) {
+    const labels = await check.locator('label').allInnerTexts()
+    const item = [...PRACTICE_ITEMS_BY_ID.values()].find(
+      (candidate) =>
+        candidate.kind === 'choice' &&
+        candidate.options.every((option) => labels.some((label) => label.includes(option))),
+    )
+    if (item === undefined || item.kind !== 'choice') throw new Error('unrecognised question')
+
+    // The options were shuffled when the question was asked, so the right one is found by its
+    // text rather than by the index the bank happens to store.
+    const correct = item.options[item.correctIndex] ?? ''
+    const index = labels.findIndex((label) => label.includes(correct))
+    await check.getByTestId(`check-option-${String(index)}`).check()
+  } else {
+    const prompt = await check.getByTestId('check-prompt').innerText()
+    const code = await check.getByTestId('check-code').innerText()
+    const item = [...PRACTICE_ITEMS_BY_ID.values()].find(
+      (candidate) => candidate.prompt === prompt && (candidate.code ?? '') === code,
+    )
+    if (item === undefined || item.kind !== 'predict-output') throw new Error('unrecognised question')
+    await check.getByTestId('check-input').fill(item.expectedOutput)
+  }
+
+  await check.getByTestId('check-submit').click()
+  // The region itself is always in the document — a live region has to be, or its first
+  // message is not announced — so the heading is what says an answer has been marked.
+  await expect(check.getByTestId('check-verdict-heading')).toBeVisible()
 }

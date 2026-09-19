@@ -36,6 +36,11 @@ interface Props {
   readonly item: PresentedItem
   /** True when answering this question will certainly end the diagnostic. */
   readonly isLast: boolean
+  /**
+   * The data this page was rendered against, sent with every answer so that a tab open from
+   * before a reset cannot begin a fresh assessment by answering an old question (ADR-0034).
+   */
+  readonly generation: number
 }
 
 /** What the practical question produced locally, before anything is submitted. */
@@ -76,7 +81,7 @@ function runSummary(result: RunResult): string {
   }
 }
 
-export function DiagnosticRunner({ item, isLast }: Props) {
+export function DiagnosticRunner({ item, isLast, generation }: Props) {
   const router = useRouter()
   const [choice, setChoice] = useState<number | null>(null)
   const [text, setText] = useState('')
@@ -178,7 +183,7 @@ export function DiagnosticRunner({ item, isLast }: Props) {
         : null
 
     setSending(true)
-    submitDiagnosticAnswer(item.id, answer, execution)
+    submitDiagnosticAnswer(item.id, answer, execution, generation)
       .then((result) => {
         if (result.status === 'not-current') {
           // A stale tab, or the same answer arriving twice by another route. The page is
@@ -202,7 +207,7 @@ export function DiagnosticRunner({ item, isLast }: Props) {
       .finally(() => {
         setSending(false)
       })
-  }, [choice, code, item, localRun, router, text])
+  }, [choice, code, generation, item, localRun, router, text])
 
   const goNext = useCallback(() => {
     startRefresh(() => {
@@ -212,7 +217,7 @@ export function DiagnosticRunner({ item, isLast }: Props) {
 
   const skip = useCallback(() => {
     setSending(true)
-    skipDiagnosticItem(item.id)
+    skipDiagnosticItem(item.id, generation)
       .then(() => {
         startRefresh(() => {
           router.refresh()
@@ -224,7 +229,7 @@ export function DiagnosticRunner({ item, isLast }: Props) {
       .finally(() => {
         setSending(false)
       })
-  }, [item.id, router])
+  }, [generation, item.id, router])
 
   const judged = outcome !== null && (outcome.status === 'recorded' || outcome.status === 'already-answered')
 

@@ -90,15 +90,44 @@ export function availableConcepts(lookup: StateLookup): readonly Concept[] {
  * Ties inside a tier break on the curriculum's declaration order, so the same state always
  * produces the same choice.
  */
-export function selectNextConcept(lookup: StateLookup, now: number): Selection | null {
-  const available = availableConcepts(lookup)
+export interface SelectionOptions {
+  /**
+   * False to ask what the scheduler would choose with every due concept set aside.
+   *
+   * Set aside, not merely demoted: a due concept is often also the weakest or least settled one,
+   * and a second choice that came back as the same concept would offer nothing (as the first
+   * version of this did).
+   *
+   * Reviews come first, and a review is cleared only by an answer. If one cannot be asked —
+   * a concept whose authored questions are used up, with no provider to write another — then
+   * without this the same review would be first for ever, and every other concept would be
+   * refused, because nothing may be started that the scheduler has not chosen. This is the
+   * second choice that keeps new material reachable. It changes nothing that is stored, and
+   * the review stays first (M7 review finding M-4).
+   */
+  readonly includeReviews?: boolean | undefined
+}
+
+export function selectNextConcept(
+  lookup: StateLookup,
+  now: number,
+  options: SelectionOptions = {},
+): Selection | null {
+  const reachable = availableConcepts(lookup)
+  const available =
+    options.includeReviews === false
+      ? reachable.filter((concept) => !isReviewDue(lookup(concept.id), now))
+      : reachable
 
   // Dueness is decided by `isReviewDue` rather than by comparing timestamps here, so the
-  // scheduler and whatever sets `nextReviewAt` can never disagree about what is due. No part
-  // of the interface shows dueness yet; when it does, it uses the same predicate.
-  const dueForReview = available
-    .filter((concept) => isReviewDue(lookup(concept.id), now))
-    .map((concept) => ({ concept, overdueMs: overdueBy(lookup(concept.id), now) }))
+  // scheduler and whatever sets `nextReviewAt` can never disagree about what is due. Home's
+  // "also due" list and the record page use the same predicate for the same reason.
+  const dueForReview =
+    options.includeReviews === false
+      ? []
+      : available
+          .filter((concept) => isReviewDue(lookup(concept.id), now))
+          .map((concept) => ({ concept, overdueMs: overdueBy(lookup(concept.id), now) }))
   if (dueForReview.length > 0) {
     const best = pickBy(dueForReview, (candidate) => -candidate.overdueMs)
     return { conceptId: best.concept.id, reason: { kind: 'review-due', overdueMs: best.overdueMs } }
@@ -164,13 +193,29 @@ function pickBy<T>(items: readonly T[], score: (item: T) => number): T {
  * Derived from the reason the scheduler actually acted on, so it cannot drift away from
  * the real decision.
  */
-export function describeSelection(selection: Selection): string {
+/**
+ * How the sentence is being used.
+ *
+ * `resuming` is true when there is already a conversation about the concept. The `new` tier is
+ * about evidence — nothing on the concept has been checked — not about whether the learner has
+ * met it, so "Starting …" is true on Home before anything has been said and false over a
+ * conversation with history in it. Both reviews of M7 found that sentence under a conversation
+ * the learner was in the middle of.
+ */
+export interface DescribeOptions {
+  readonly resuming?: boolean | undefined
+}
+
+export function describeSelection(selection: Selection, options: DescribeOptions = {}): string {
   const title = getConcept(selection.conceptId).title.toLowerCase()
 
   switch (selection.reason.kind) {
     case 'review-due': {
       const days = Math.floor(selection.reason.overdueMs / 86_400_000)
-      const when = days >= 1 ? `${String(days)} day${days === 1 ? '' : 's'} ago` : 'earlier today'
+      // Elapsed time, said as elapsed time. "Earlier today" is a calendar claim, and a review
+      // that fell due at 23:00 is not "earlier today" at 08:00 — Home's calendar-day wording and
+      // this sentence contradicted each other on the same screen (M7 review finding L-2).
+      const when = days >= 1 ? `${String(days)} day${days === 1 ? '' : 's'} ago` : 'less than a day ago'
       return `Coming back to ${title}, which was due for review ${when}. Recalling something after a gap is what makes it stick.`
     }
     case 'weak':
@@ -180,7 +225,9 @@ export function describeSelection(selection: Selection): string {
     case 'in-progress':
       return `Continuing with ${title}. You have made a start, but there is not yet enough to be confident either way.`
     case 'new':
-      return `Starting ${title}. Everything it depends on is in place.`
+      return options.resuming === true
+        ? `Going back to ${title}. Nothing on it has been checked yet, so the next question will tell the tutor something.`
+        : `Starting ${title}. Everything it depends on is in place.`
     case 'consolidating':
       /*
        * Says only what this tier actually established: developing, and as settled as repetition
@@ -205,7 +252,11 @@ export function describeSelection(selection: Selection): string {
  * No number reaches this list. The bands and the words are what the learner sees everywhere
  * else, and "your estimate is 0.31" would be a precision the estimate does not have.
  */
-export function groundsFor(selection: Selection, lookup: StateLookup): readonly string[] {
+export function groundsFor(
+  selection: Selection,
+  lookup: StateLookup,
+  options: DescribeOptions = {},
+): readonly string[] {
   const concept = getConcept(selection.conceptId)
   const state = lookup(selection.conceptId)
   const grounds: string[] = []
@@ -216,7 +267,7 @@ export function groundsFor(selection: Selection, lookup: StateLookup): readonly 
       grounds.push(
         days >= 1
           ? `It was due to be revisited ${String(days)} day${days === 1 ? '' : 's'} ago.`
-          : 'It was due to be revisited today.',
+          : 'It was due to be revisited less than a day ago.',
       )
       grounds.push('Coming back to something after a gap is what makes it stay.')
       break
@@ -229,7 +280,11 @@ export function groundsFor(selection: Selection, lookup: StateLookup): readonly 
       grounds.push('Another go would tell the tutor more than repeating something settled.')
       break
     case 'new':
-      grounds.push('You have not worked on this yet.')
+      grounds.push(
+        options.resuming === true
+          ? 'You have talked about this, but nothing on it has been checked yet.'
+          : 'You have not worked on this yet.',
+      )
       break
     case 'consolidating':
       // Both lines are properties of the tier itself. Nothing here claims anything about how

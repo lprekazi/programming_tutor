@@ -54,6 +54,14 @@ export type SelectionGround =
   | { readonly kind: 'shaky' }
   /** Underway, and another answer would settle which way it is going. */
   | { readonly kind: 'unsettled' }
+  /**
+   * The concept came round for review, and this sitting is that review.
+   *
+   * Retrieval rather than re-reading is the point of a review (Roediger & Karpicke, 2006), so
+   * the question comes first here rather than after some teaching. The ground is recorded with
+   * the activity, so a question asked for this reason says so.
+   */
+  | { readonly kind: 'due-review' }
 
 export type CheckDecision =
   | { readonly kind: 'ask'; readonly item: PracticeItem; readonly ground: SelectionGround }
@@ -79,6 +87,17 @@ export type HoldReason =
 
 export interface CheckContext {
   readonly conceptId: ConceptId
+  /**
+   * True when this sitting is a review the scheduler asked for.
+   *
+   * It lifts two holds, and only those two. `too-early` exists so that a lesson is not
+   * interrupted before it has begun — but a review opens *with* the question, so there is
+   * nothing to interrupt. `nothing-to-learn` exists so that a settled concept is not asked
+   * about pointlessly — but dueness is precisely the claim that time has passed since it was
+   * shown, which is the one thing a further question can tell us. Everything else still holds:
+   * a review cannot become an interrogation either.
+   */
+  readonly review?: boolean | undefined
   readonly state: ConceptState
   /** Misconceptions observed recently, most recent first. From real attempts, not conversation. */
   readonly recentMisconceptions: readonly MisconceptionId[]
@@ -108,7 +127,11 @@ export interface CheckContext {
  * explicit that this must not feel like switching into a separate quiz application.
  */
 export function decideCheck(context: CheckContext): CheckDecision {
-  if (context.exchanges < TURNS_BEFORE_FIRST_CHECK) return { kind: 'hold', because: 'too-early' }
+  const review = context.review === true
+
+  if (!review && context.exchanges < TURNS_BEFORE_FIRST_CHECK) {
+    return { kind: 'hold', because: 'too-early' }
+  }
   if (context.lastWasCheck) return { kind: 'hold', because: 'just-asked' }
   if (context.checksSoFar >= MAX_CHECKS_PER_SESSION) {
     return { kind: 'hold', because: 'enough-for-now' }
@@ -116,7 +139,7 @@ export function decideCheck(context: CheckContext): CheckDecision {
 
   // Nothing a question would tell anybody. Asking anyway would be asking to populate data,
   // which the brief rules out and which wastes the learner's time.
-  if (bandOf(context.state) === 'secure' && evidenceStrengthOf(context.state) === 'strong') {
+  if (!review && bandOf(context.state) === 'secure' && evidenceStrengthOf(context.state) === 'strong') {
     return { kind: 'hold', because: 'nothing-to-learn' }
   }
 
@@ -192,6 +215,11 @@ function groundFor(context: CheckContext): SelectionGround {
 
   if (probeable !== undefined) return { kind: 'probes-misconception', misconception: probeable }
 
+  // Below a probe, because a specific wrong idea is worth more than a general recall question,
+  // and above the band-based grounds, because *why the learner is here today* is the true
+  // reason and the one the interface shows them.
+  if (context.review === true) return { kind: 'due-review' }
+
   const band = bandOf(context.state)
   if (band === 'not-started') return { kind: 'no-evidence-yet' }
   if (band === 'needs-review') return { kind: 'shaky' }
@@ -229,5 +257,8 @@ export function describeGround(ground: SelectionGround): string {
       return 'A check on this, because it has been going wrong.'
     case 'unsettled':
       return 'A check on this, because one more answer would settle which way it is going.'
+    case 'due-review':
+      // Retrieval before re-reading: the review starts by asking rather than by explaining.
+      return 'Starting the review by recalling it, which is what makes it stay.'
   }
 }

@@ -113,8 +113,10 @@ test.describe('at 360px', () => {
 
     await page.getByTestId('finish-diagnostic').click()
     await expect(page).toHaveURL(/\/home$/)
+    expect(await scrollsSideways(page)).toBe(false)
 
     // Thirty-three concepts in a three-column grid is the other layout that could burst.
+    await page.goto('/concepts')
     expect(await scrollsSideways(page)).toBe(false)
     await expect(page.getByTestId('band-program-execution')).toBeVisible()
   })

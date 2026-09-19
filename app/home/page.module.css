@@ -62,6 +62,18 @@
 
 /* ---- the one thing to do next --------------------------------------------- */
 
+/*
+ * What kind of step this is, in words. Never colour alone: the word is the signal, and the
+ * attribute beside it is for tests rather than for the reader.
+ */
+.kind {
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
 .nextStep {
   display: grid;
   justify-items: start;
@@ -85,6 +97,42 @@
 }
 
 .primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/*
+ * The second choice under a review. A sentence rather than a second button, so it reads as an
+ * option rather than competing with the thing the scheduler put first.
+ */
+.alternative {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+  max-width: var(--measure-prose);
+  margin-top: var(--space-2);
+  color: var(--ink-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* An outline, never filled: the review stays the thing the page puts first. */
+.secondary {
+  min-height: 2.75rem;
+  padding: var(--space-2) var(--space-4);
+  background-color: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius-md);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.secondary:hover:not(:disabled) {
+  border-color: var(--ink-muted);
+}
+
+.secondary:disabled {
   opacity: 0.6;
   cursor: default;
 }
@@ -122,86 +170,41 @@
   line-height: var(--leading-relaxed);
 }
 
-/* ---- the concept list ---------------------------------------------------- */
-
-.area {
-  margin-bottom: var(--space-6);
-}
-
-.areaHeading {
-  padding-bottom: var(--space-2);
-  margin-bottom: var(--space-2);
-  border-bottom: 1px solid var(--rule);
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-
-.concepts {
-  padding: 0;
-  list-style: none;
-}
-
-.concept {
-  display: grid;
-  grid-template-columns: 1fr 8rem 12rem;
-  gap: var(--space-4);
-  align-items: baseline;
-  padding: var(--space-2) 0;
-}
-
-.concept + .concept {
-  border-top: 1px solid var(--rule);
-}
-
-.conceptTitle {
-  /*
-   * Indented whether or not this row opens, so the column stays straight down the list and
-   * the marker below has somewhere to sit.
-   */
-  padding-left: var(--space-4);
-  font-size: var(--text-sm);
-}
+/* ---- what else is waiting ------------------------------------------------- */
 
 /*
- * Four words, no bar, no percentage. The estimate behind this is a single number with wide
- * uncertainty; rendering it as a filled meter would claim a precision that does not exist.
+ * Two plain lists. Review information is restrained on purpose: a concept coming round again
+ * is ordinary, and a page that renders it as a backlog with counts would be inventing an
+ * urgency the scheduling does not imply.
  */
-.band {
+.dueList,
+.openList {
+  display: grid;
+  gap: var(--space-2);
+  max-width: var(--measure-prose);
+  padding: 0;
+  list-style: none;
   font-size: var(--text-sm);
 }
 
-.bandNotStarted {
-  color: var(--ink-faint);
+.dueList li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--rule);
 }
 
-.bandDeveloping {
-  color: var(--caution);
+.dueConcept {
+  font-size: var(--text-sm);
 }
 
-.bandSecure {
-  color: var(--positive);
-}
-
-.bandNeedsReview {
-  color: var(--negative);
-}
-
-/* Kept beside the band, never folded into it: how much is behind the judgement. */
-.strength {
+.dueWhen,
+.openWhen {
   color: var(--ink-faint);
   font-size: var(--text-xs);
-}
-
-@media (max-width: 38rem) {
-  .concept {
-    grid-template-columns: 1fr auto;
-    gap: var(--space-1) var(--space-3);
-  }
-
-  .strength {
-    grid-column: 1 / -1;
-  }
 }
 
 .footer {
@@ -211,109 +214,4 @@
   padding-top: var(--space-5);
   border-top: 1px solid var(--rule);
   font-size: var(--text-sm);
-}
-
-/* ---- why a band says what it says ----------------------------------------- */
-
-/*
- * The evidence behind a concept, on request.
- *
- * Closed by default: thirty-three concepts each showing their history would be a wall. Open,
- * it answers the only question a coarse band invites — "why does it say that?" — with the
- * reason the domain recorded at the time rather than a sentence composed here to sound
- * plausible.
- */
-.conceptWithHistory + .conceptWithHistory,
-.conceptWithHistory + .concept,
-.concept + .conceptWithHistory {
-  border-top: 1px solid var(--rule);
-}
-
-/*
- * The native marker is suppressed because it would sit outside the row's grid and pull the
- * title column out of line. It is replaced rather than removed: a row that opens has to say so
- * to someone who is not hovering it — on a touch screen nobody is — and a hover underline
- * alone left the whole feature undiscoverable.
- *
- * The same idiom as "Why this?" further up the page, so the two read as one mechanism.
- */
-.history summary {
-  cursor: pointer;
-  list-style: none;
-}
-
-.history summary::-webkit-details-marker {
-  display: none;
-}
-
-.history summary .conceptTitle {
-  position: relative;
-}
-
-.history summary .conceptTitle::before {
-  position: absolute;
-  left: 0;
-  color: var(--ink-faint);
-  content: '\25b8';
-  transition: transform 120ms ease;
-}
-
-.history[open] summary .conceptTitle::before {
-  transform: rotate(90deg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .history summary .conceptTitle::before {
-    transition: none;
-  }
-}
-
-.history summary:hover .conceptTitle,
-.history summary:focus-visible .conceptTitle {
-  text-decoration: underline;
-  text-underline-offset: 0.18em;
-}
-
-.evidence {
-  display: grid;
-  gap: var(--space-3);
-  padding: var(--space-3) 0 var(--space-4);
-  margin-left: var(--space-4);
-  border-left: 1px solid var(--rule);
-  list-style: none;
-}
-
-.evidenceEntry {
-  display: grid;
-  grid-template-columns: 4rem 1fr;
-  gap: var(--space-3);
-  padding-left: var(--space-4);
-  font-size: var(--text-sm);
-  line-height: var(--leading-relaxed);
-}
-
-.evidenceWhen {
-  color: var(--ink-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-.evidenceWhat {
-  color: var(--ink-muted);
-}
-
-.evidenceMore {
-  padding-left: var(--space-8);
-  color: var(--ink-faint);
-  font-size: var(--text-xs);
-}
-
-@media (max-width: 38rem) {
-  .evidenceEntry {
-    grid-template-columns: 1fr;
-    gap: var(--space-1);
-  }
-
-  .evidenceMore {
-    padding-left: var(--space-4);
-  }
 }

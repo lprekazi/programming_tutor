@@ -29,6 +29,7 @@ function turn(partial: Partial<Turn> & { ordinal: number }): Turn {
     role: 'tutor',
     text: 'something',
     status: 'complete',
+    createdAt: 0,
     ...partial,
   }
 }

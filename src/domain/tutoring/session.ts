@@ -49,6 +49,22 @@ export interface Turn {
   readonly role: TurnRole
   readonly text: string
   readonly status: TurnStatus
+  /** When the turn was created. What separates this sitting from the last one. */
+  readonly createdAt: number
+}
+
+/**
+ * The turns belonging to the sitting that began at `resumedAt`.
+ *
+ * A session is unique per concept and is reopened rather than replaced, so its turns accumulate
+ * for the life of the profile. Anything that means "just now" — whether a question was the last
+ * thing that happened, whether this sitting has opened yet — has to be asked of the sitting,
+ * not of the conversation. Asked of the conversation, a learner returning after three weeks was
+ * told they had "just answered one" about an answer from three weeks ago (M7 review finding H1).
+ */
+export function turnsInSitting(turns: readonly Turn[], resumedAt: number): readonly Turn[] {
+  if (!Number.isFinite(resumedAt)) return turns
+  return turns.filter((turn) => turn.createdAt >= resumedAt)
 }
 
 /**

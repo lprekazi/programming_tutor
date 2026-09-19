@@ -20,7 +20,6 @@ import {
   saveExperience,
   saveGoal,
   reopenOnboardingAt,
-  resetLearner,
 } from '@/db/repositories/learner-repository'
 import {
   appendLearnerTurn,
@@ -31,7 +30,6 @@ import {
   readSessionByTurn,
   readSessionForConcept,
   recordCancellation,
-  reopenSession,
   reserveActivityTurn,
   reserveTutorTurn,
 } from '@/db/repositories/session-repository'
@@ -45,6 +43,7 @@ import {
   type ActivityRecord,
 } from '@/db/repositories/activity-repository'
 import { DatabaseCallLog } from '@/db/repositories/call-log-repository'
+import { generationIsCurrent, resetEverything as deleteEverything } from '@/db/repositories/meta-repository'
 import { readSessionExercises } from '@/db/repositories/exercise-repository'
 import {
   composeFeedback,
@@ -62,9 +61,16 @@ import { isConceptId, isMisconceptionId } from '@/domain/curriculum/graph'
 import {
   MAX_MESSAGE_LENGTH,
   replyInProgress,
+  turnsInSitting,
   unfinishedTutorTurn,
 } from '@/domain/tutoring/session'
-import { describeSelection, selectNextConcept, stateLookupFrom } from '@/domain/scheduling/select'
+import {
+  beginSitting,
+  isReviewingNow,
+  isSchedulable,
+  refreshSitting,
+  sittingFor,
+} from '@/tutor/session/sitting'
 import { converseStrategy, explainStrategy } from '@/tutor/strategies/prose'
 import type { Area, ConceptId, MisconceptionId } from '@/domain/curriculum/types'
 import type { Confidence } from '@/domain/onboarding/self-report'
@@ -103,6 +109,23 @@ function fieldOf(formData: FormData, name: string): string {
   return typeof value === 'string' ? value : ''
 }
 
+/**
+ * Whether a write belongs to the data the page it came from was rendered against.
+ *
+ * Only the writes that are not already anchored to a row need this. Answering a question or
+ * sending a message names an activity or a session, and a reset deletes both, so those writes
+ * fail on their own. The ones that do not name anything — onboarding, starting the diagnostic,
+ * opening a session — would otherwise write happily into the fresh profile, putting back a
+ * piece of what the learner had just deleted (ADR-0034).
+ */
+function writtenAgainstCurrentData(generation: unknown): boolean {
+  return generationIsCurrent(getDb(), generation)
+}
+
+/** The stale-tab message. One sentence, and it says what to do about it. */
+const STALE_TAB =
+  'This page was open before the data was deleted, so nothing was saved. Reload to start again.'
+
 const AREAS = new Set<string>([
   'fundamentals',
   'variables-and-types',
@@ -139,8 +162,14 @@ export type StepResult =
   | { readonly status: 'invalid'; readonly message: string }
   /** Onboarding is already finished — a stale form in another tab. Nothing was written. */
   | { readonly status: 'already-done' }
+  /** The page was rendered before the data was deleted. Nothing was written. */
+  | { readonly status: 'stale' }
 
 export async function submitGoal(formData: FormData): Promise<StepResult> {
+  if (!writtenAgainstCurrentData(Number(fieldOf(formData, 'generation')))) {
+    return { status: 'stale' }
+  }
+
   const goal = fieldOf(formData, 'goal').trim()
   const interests = formData
     .getAll('interests')
@@ -159,6 +188,10 @@ export async function submitGoal(formData: FormData): Promise<StepResult> {
 }
 
 export async function submitExperience(formData: FormData): Promise<StepResult> {
+  if (!writtenAgainstCurrentData(Number(fieldOf(formData, 'generation')))) {
+    return { status: 'stale' }
+  }
+
   const experience = fieldOf(formData, 'experience')
   if (!EXPERIENCE_LEVELS.has(experience)) {
     return { status: 'invalid', message: 'Choose one of the four before continuing.' }
@@ -177,12 +210,20 @@ export async function submitExperience(formData: FormData): Promise<StepResult> 
  * ridiculous price for a mis-click. The answers themselves are untouched: the forms are
  * prefilled from what was stored, so stepping back shows what they said rather than a blank.
  */
-export async function goBackTo(step: 'goal' | 'experience'): Promise<void> {
+export async function goBackTo(step: 'goal' | 'experience', generation: number): Promise<void> {
+  // Nothing here can render a refusal — the caller gets no value back — so a tab from before a
+  // reset is sent to the first run, which is where it actually is now (M7 review finding M7).
+  if (!writtenAgainstCurrentData(generation)) redirect('/')
+
   reopenOnboardingAt(getDb(), Date.now(), step)
   revalidatePath('/welcome')
 }
 
 export async function submitConfidence(formData: FormData): Promise<StepResult> {
+  if (!writtenAgainstCurrentData(Number(fieldOf(formData, 'generation')))) {
+    return { status: 'stale' }
+  }
+
   const confidence: Partial<Record<Area, Confidence>> = {}
 
   for (const [key, value] of formData.entries()) {
@@ -263,9 +304,14 @@ export async function submitDiagnosticAnswer(
   itemId: string,
   answer: string,
   execution: ExecutionReport | null,
+  generation: number,
 ): Promise<AnswerResult> {
   const db = getDb()
   const now = Date.now()
+
+  // Starting a diagnostic is one of the writes that names nothing, so a tab open from before a
+  // reset could otherwise begin a fresh assessment by answering an old question.
+  if (!writtenAgainstCurrentData(generation)) return { status: 'failed', message: STALE_TAB }
   const item = getDiagnosticItem(itemId)
   const progress = openDiagnostic(db, now)
 
@@ -420,9 +466,12 @@ async function judgeExplanation(
  * Nothing is recorded against the learner — not a wrong answer, not a guess. The question
  * simply stops being offered, and the end-of-diagnostic summary says it was left out.
  */
-export async function skipDiagnosticItem(itemId: string): Promise<void> {
+export async function skipDiagnosticItem(itemId: string, generation: number): Promise<void> {
   const db = getDb()
   const now = Date.now()
+  // As with `goBackTo`: no return value to refuse with, so the stale tab is sent to the first
+  // run rather than left pressing a button that silently does nothing.
+  if (!writtenAgainstCurrentData(generation)) redirect('/')
   const progress = openDiagnostic(db, now)
   const decision = decideNext(db, progress, unmarkableItemIds())
 
@@ -436,9 +485,10 @@ export async function skipDiagnosticItem(itemId: string): Promise<void> {
 }
 
 /** Marks the diagnostic finished. Safe to call more than once. */
-export async function finishDiagnostic(): Promise<void> {
+export async function finishDiagnostic(formData: FormData): Promise<void> {
   const db = getDb()
   const now = Date.now()
+  if (!writtenAgainstCurrentData(Number(fieldOf(formData, 'generation')))) redirect('/')
   const progress = openDiagnostic(db, now)
   const decision = decideNext(db, progress, unmarkableItemIds())
 
@@ -455,22 +505,35 @@ export type ResetResult =
   | { readonly status: 'idle' }
   /** What was typed did not match. Nothing was deleted. */
   | { readonly status: 'mismatch' }
+  /** The deletion itself failed. It is one transaction, so nothing was half-deleted. */
+  | { readonly status: 'failed' }
 
 /**
  * Deletes the learner's entire history.
  *
  * The typed confirmation is checked here rather than only in the browser, so the action cannot
- * destroy anything on the strength of a check that a page could have skipped.
+ * destroy anything on the strength of a check that a page could have skipped. It is compared
+ * exactly, case included: the word is short, it is shown on the page, and "reset" typed in
+ * passing should not be enough to delete somebody's history.
+ *
+ * The deletion and the generation bump happen in one transaction (`deleteEverything`), so a tab
+ * that was open a moment ago cannot write into the empty profile left behind.
  */
 export async function resetEverything(formData: FormData): Promise<ResetResult> {
-  const typed = fieldOf(formData, 'confirmation').trim().toLowerCase()
-  if (typed !== RESET_CONFIRMATION) return { status: 'mismatch' }
+  if (fieldOf(formData, 'confirmation').trim() !== RESET_CONFIRMATION) return { status: 'mismatch' }
 
-  resetLearner(getDb())
-  revalidatePath('/')
-  revalidatePath('/welcome')
-  revalidatePath('/diagnostic')
-  revalidatePath('/home')
+  try {
+    deleteEverything(getDb(), Date.now())
+  } catch {
+    /*
+     * A locked or unwritable database. The deletion and the generation bump are one
+     * transaction, so there is no half-deleted profile to explain — the learner is told it did
+     * not happen, which is true, rather than being redirected to a first run that is not there.
+     */
+    return { status: 'failed' }
+  }
+
+  revalidatePath('/', 'layout')
   redirect('/')
 }
 
@@ -482,6 +545,8 @@ export type StartResult =
   | { readonly status: 'ready'; readonly sessionId: string }
   /** The scheduler has nothing to recommend. */
   | { readonly status: 'nothing-to-study' }
+  /** The page was rendered before the data was deleted. Nothing was opened. */
+  | { readonly status: 'stale' }
 
 /**
  * Opens the session for a concept and makes sure it has an opening turn to stream.
@@ -491,32 +556,30 @@ export type StartResult =
  * second press finds the same row rather than reserving another. Neither depends on the
  * browser behaving.
  */
-export async function startSession(conceptId: string): Promise<StartResult> {
+export async function startSession(conceptId: string, generation: number): Promise<StartResult> {
   const db = getDb()
   const now = Date.now()
 
   if (!isConceptId(conceptId)) return { status: 'nothing-to-study' }
+  // Opening a session creates a row that a reset had just removed, so it is one of the writes
+  // a tab from before the reset must not be able to make.
+  if (!writtenAgainstCurrentData(generation)) return { status: 'stale' }
 
-  const selection = selectNextConcept(stateLookupFrom(readConceptStates(db)), now)
   const existing = readSessionForConcept(db, conceptId)
 
-  // A concept can be studied when the scheduler currently recommends it, or when there is
-  // already a conversation about it to continue. Anything else is a stale link or a guess at
-  // a URL, and starting teaching on the strength of one would step around the scheduler.
-  if (existing === null && selection?.conceptId !== conceptId) {
+  // A concept can be studied when the scheduler currently recommends it — first choice, or the
+  // second it offers under a review (finding M-4) — or when there is already a conversation
+  // about it to continue. Anything else is a stale link or a guess at a URL, and starting
+  // teaching on the strength of one would step around the scheduler.
+  if (existing === null && !isSchedulable(db, conceptId, now)) {
     return { status: 'nothing-to-study' }
   }
 
-  const reason = existing?.openedReason ?? (selection === null ? '' : describeSelection(selection))
-  const session = openSession(db, conceptId, reason, now)
-  reopenSession(db, session.id, now)
-
-  // Reserved here so the session page has a turn to stream the moment it loads. Idempotent:
-  // a second press finds the same row rather than reserving another.
-  const opening = session.turns.find((turn) => turn.ordinal === 0)
-  if (opening === undefined || opening.status !== 'complete') {
-    reserveTutorTurn(db, session.id, openingProvenance(), now)
-  }
+  const sitting = sittingFor(db, conceptId, now, existing !== null && existing.turns.length > 0)
+  const session = openSession(db, conceptId, sitting.reason, now, sitting.mode)
+  // Home's button is a deliberate choice, so a sitting that began as a lesson becomes a review
+  // if that is what Home offered.
+  beginSitting(db, session, now, openingProvenance(), { upgrade: true })
 
   revalidatePath('/home')
   revalidatePath(`/session/${session.id}`)
@@ -528,6 +591,30 @@ function openingProvenance() {
     strategyId: explainStrategy.id,
     strategyVersion: explainStrategy.version,
     model: resolveProvider()?.model ?? 'unavailable',
+  }
+}
+
+/**
+ * Starts the sitting for a conversation reached without going through Home.
+ *
+ * A bookmark, the browser's Back button and Home's "still open" list all land on the session
+ * page directly, and a page render must not write — a prefetch would then start sittings nobody
+ * asked for. So the page, once it is actually on screen, asks for this instead. It does exactly
+ * what Home's button does for a lapsed conversation — a fresh purpose, a tutor turn to open it —
+ * and nothing at all within a sitting, so a reload or a second tab cannot start two (finding
+ * H-2). A conversation the learner finished is left finished: reading it is not reopening it,
+ * and writing in it reopens it anyway (finding M4).
+ */
+export async function resumeSitting(sessionId: string): Promise<void> {
+  const db = getDb()
+  const now = Date.now()
+
+  const session = readSession(db, sessionId)
+  if (session === null || session.closedAt !== null) return
+
+  if (beginSitting(db, session, now, openingProvenance(), { upgrade: false })) {
+    revalidatePath(`/session/${sessionId}`)
+    revalidatePath('/home')
   }
 }
 
@@ -558,8 +645,17 @@ export async function sendMessage(sessionId: string, text: string): Promise<Send
     }
   }
 
-  const session = readSession(db, sessionId)
-  if (session === null) return { status: 'rejected', message: 'That session no longer exists.' }
+  const found = readSession(db, sessionId)
+  if (found === null) return { status: 'rejected', message: 'That session no longer exists.' }
+
+  /*
+   * Writing here is the learner picking the conversation up again — including one they had
+   * finished with, which they can reach by pressing Back. Nothing refuses them; the sitting is
+   * brought up to date instead, so the conversation they are in is the one Home talks about
+   * (M7 review finding M4).
+   */
+  refreshSitting(db, found, now)
+  const session = readSession(db, sessionId) ?? found
 
   /*
    * An unfinished tutor turn is closed off rather than used to refuse the learner.
@@ -699,8 +795,13 @@ export async function askCheck(sessionId: string): Promise<CheckResult> {
   const db = getDb()
   const now = Date.now()
 
-  const session = readSession(db, sessionId)
-  if (session === null) return { status: 'unavailable', message: 'That session no longer exists.' }
+  const found = readSession(db, sessionId)
+  if (found === null) return { status: 'unavailable', message: 'That session no longer exists.' }
+
+  // Asking for a question is working in the session, so it starts a sitting where one is
+  // needed — a conversation reached by a bookmark or the Back button included.
+  refreshSitting(db, found, now)
+  const session = readSession(db, sessionId) ?? found
 
   // A reply still arriving. Interrupting it with a question would leave two things waiting at
   // once — but a reply that *failed* is not a reason to refuse, which is why this asks the
@@ -730,8 +831,14 @@ export async function askCheck(sessionId: string): Promise<CheckResult> {
     }
   }
 
+  const sittingTurns = turnsInSitting(session.turns, session.resumedAt)
+
   const decision = decideCheck({
     conceptId: session.conceptId,
+    // A sitting the scheduler opened as a review asks first and teaches afterwards — while the
+    // concept is still due. A review that has since been answered is an ordinary sitting again,
+    // and must not keep lifting the holds that exist for ordinary sittings (finding M5).
+    review: isReviewingNow(db, session, now),
     state: readConceptState(db, session.conceptId),
     recentMisconceptions: readRecentMisconceptions(db),
     usedItemIds: readUsedItemIds(db),
@@ -740,7 +847,10 @@ export async function askCheck(sessionId: string): Promise<CheckResult> {
     assessed: readConceptStates(db)
       .filter((state) => state.evidenceCount > 0)
       .map((state) => state.conceptId),
-    exchanges: session.turns.filter((turn) => turn.role === 'learner').length,
+    // Per sitting, like the other two below. Counted over the conversation, `too-early` was
+    // already spent for any learner who had ever said anything, so a returning lesson could open
+    // on a question before a word of it had been read (finding M-3).
+    exchanges: sittingTurns.filter((turn) => turn.role === 'learner').length,
     /*
      * Checks in *this sitting*, not for all time.
      *
@@ -751,7 +861,14 @@ export async function askCheck(sessionId: string): Promise<CheckResult> {
      * and the sentence explaining the refusal was untrue.
      */
     checksSoFar: activities.filter((activity) => activity.createdAt >= session.resumedAt).length,
-    lastWasCheck: session.turns.at(-1)?.role === 'activity',
+    /*
+     * The last thing *in this sitting*, not in the conversation.
+     *
+     * Read from the whole conversation, a learner who ended a sitting by answering a question
+     * was refused the first question of their next one — weeks later — with "you have just
+     * answered one" (M7 review finding H1).
+     */
+    lastWasCheck: sittingTurns.at(-1)?.role === 'activity',
   })
 
   if (decision.kind === 'hold') return { status: 'held', because: decision.because }

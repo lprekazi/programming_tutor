@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { submitConfidence, submitExperience, submitGoal } from '../actions'
 import { StepForm } from './StepForm'
 import { getDb } from '@/db/instance'
+import { readDataGeneration } from '@/db/repositories/meta-repository'
 import { requestNow } from '@/db/request-time'
 import { ensureLearner, readProfile, readSelfReport } from '@/db/repositories/learner-repository'
 import type { Area } from '@/domain/curriculum/types'
@@ -94,6 +95,8 @@ export default function WelcomePage() {
   const db = getDb()
   ensureLearner(db, requestNow())
   const profile = readProfile(db)
+  // Rendered into each form, so an answer from a tab that predates a reset is refused.
+  const generation = readDataGeneration(db)
 
   if (profile?.onboardingComplete === true) redirect('/diagnostic')
 
@@ -114,7 +117,12 @@ export default function WelcomePage() {
       <StepIndicator current={step === 'goal' ? 0 : step === 'experience' ? 1 : 2} />
 
       {step === 'goal' && (
-        <StepForm action={submitGoal} submitLabel="Continue" submitTestId="goal-continue">
+        <StepForm
+          action={submitGoal}
+          generation={generation}
+          submitLabel="Continue"
+          submitTestId="goal-continue"
+        >
           <div className={styles.field}>
             <label className={styles.label} htmlFor="goal">
               What would you like to be able to do?
@@ -154,6 +162,7 @@ export default function WelcomePage() {
       {step === 'experience' && (
         <StepForm
           action={submitExperience}
+          generation={generation}
           back={{ step: 'goal', label: 'Back to what you want' }}
           submitLabel="Continue"
           submitTestId="experience-continue"
@@ -185,6 +194,7 @@ export default function WelcomePage() {
       {step === 'confidence' && (
         <StepForm
           action={submitConfidence}
+          generation={generation}
           back={{ step: 'experience', label: 'Back to where you are' }}
           submitLabel="Start the short assessment"
           submitTestId="confidence-continue"

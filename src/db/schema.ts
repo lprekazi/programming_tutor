@@ -43,6 +43,26 @@ export const learner = sqliteTable('learner', {
 })
 
 /**
+ * One row about the installation itself, which is not the learner's data.
+ *
+ * `dataGeneration` is the point of it. Reset deletes the learner and everything that hangs off
+ * them, but a browser tab open at the time knows none of that: it still holds a rendered page,
+ * and the forms on it would happily write into the fresh, empty profile. The counter is bumped
+ * by the reset, pages render with the value current when they were served, and a write carrying
+ * an older one is refused. A tab from before the reset therefore cannot put back a fragment of
+ * what was deliberately deleted (ADR-0034).
+ *
+ * Deliberately not a child of `learner`: it has to outlive the row it is protecting.
+ */
+export const appMeta = sqliteTable('app_meta', {
+  id: integer('id').primaryKey({ autoIncrement: false }),
+  /** Incremented by every reset. Anything written against an older value is stale. */
+  dataGeneration: integer('data_generation').notNull().default(1),
+  /** When the data was last deleted on purpose, if it ever was. */
+  lastResetAt: integer('last_reset_at', { mode: 'timestamp_ms' }),
+})
+
+/**
  * What the learner said about their own confidence, per competence area.
  *
  * Kept in its own table and never merged into `concept_state`. It is a claim, not evidence:
@@ -254,6 +274,19 @@ export const tutoringSession = sqliteTable(
     resumedAt: integer('resumed_at', { mode: 'timestamp_ms' }).notNull().default(sql`0`),
     /** Set when the learner says they are done with this concept for now. */
     closedAt: integer('closed_at', { mode: 'timestamp_ms' }),
+    /**
+     * What this sitting is for: ordinary teaching, or revisiting something that came due.
+     *
+     * Per sitting rather than per session, because the same conversation is taught first and
+     * reviewed later. Set from the scheduler's own reason when the learner opens the session,
+     * never by a model (ADR-0032).
+     */
+    mode: text('mode').notNull().default('teach'),
+    /**
+     * Why the learner is here *now*, as against `openedReason`, which records why the
+     * conversation began however long ago. Null until the session has been reopened once.
+     */
+    resumedReason: text('resumed_reason'),
   },
   (table) => [unique('tutoring_session_unique_concept').on(table.learnerId, table.conceptId)],
 )
